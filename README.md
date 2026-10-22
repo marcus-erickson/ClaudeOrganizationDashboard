@@ -4,9 +4,20 @@ A coaching dashboard for organizations rolling out Claude. It shows who is getti
 
 It is a single static page (HTML, CSS and plain JavaScript with no build step and no dependencies) that runs from a folder, an internal web server or GitHub Pages.
 
-![Company overview](docs/images/overview.png)
+<table>
+  <tr>
+    <td width="33%"><img src="docs/images/1-start-here.jpg" alt="Start here this week: the five people most worth a conversation, with why and a suggested action"></td>
+    <td width="33%"><img src="docs/images/2-coaching-plan.jpg" alt="Person drill-down with the adoption ladder and a coaching plan: one focus now, the rest later"></td>
+    <td width="33%"><img src="docs/images/3-adoption-by-month.jpg" alt="Adoption by month since launch, by stage, against seats"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/images/4-training-impact.jpg" alt="Training sessions compared with people at the same stage who did not attend"></td>
+    <td><img src="docs/images/5-skill-opportunities.jpg" alt="Tasks people repeat, with skill opportunities flagged"></td>
+    <td><img src="docs/images/6-self-report.jpg" alt="The opt-in self-report each person sees before anything is shared"></td>
+  </tr>
+</table>
 
-![Rollout](docs/images/rollout.png)
+<sub>All screenshots use the fictional sample organization included in the repository.</sub>
 
 ## What it shows
 
@@ -21,7 +32,6 @@ It is a single static page (HTML, CSS and plain JavaScript with no build step an
 | **Self-report** | A preview of what each person sees when they run the opt-in self-report skill, and the exact row it shares. |
 | **Rules** | Every rule, its threshold, the Analytics API field it comes from, and the suggested action. |
 
-![Person drill-down](docs/images/person.png)
 
 ## Try it
 
@@ -55,7 +65,6 @@ The dashboard combines two sources:
 1. **Usage numbers** from the [Claude Enterprise Analytics API](https://platform.claude.com/docs/en/manage-claude/analytics-api): chats, messages, Projects, artifacts, files, company skill runs, connectors and last active date for each person. These are counts only. The API never returns chat content.
 2. **Use cases** from an opt-in **self-report**. Each person runs the [`claude-self-report`](skills/claude-self-report/SKILL.md) skill, sees a summary of their own month (work categories, features used, top repeated tasks, one "where Claude fell short" answer) and decides whether to add it to a shared Google Sheet. Chat titles, content and names are never included.
 
-![Use cases and skill opportunities](docs/images/use-cases.png)
 
 `scripts/build-data.mjs` pulls both into `data/live-data.js`, and the dashboard picks that file up automatically. [docs/SETUP.md](docs/SETUP.md) covers the details, including the data file format if you want to feed it from your own warehouse instead.
 
