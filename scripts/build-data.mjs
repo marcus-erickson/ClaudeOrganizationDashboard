@@ -120,6 +120,17 @@ async function readSource(src) {
   return fs.readFileSync(path.resolve(src), "utf8");
 }
 
+// Dates from Google Sheets can arrive as text (2026-10-22), as a US date
+// (10/22/2026) or as a serial number (46317) if the column was formatted as a date.
+function normalizeDate(v) {
+  const s = String(v || "").trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  if (/^\d{5}(\.\d+)?$/.test(s)) return addDays("1899-12-30", Math.floor(Number(s)));
+  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (m) return `${m[3]}-${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}`;
+  return "";
+}
+
 const splitList = (s) => String(s || "").split(/;|\|/).map((x) => x.trim()).filter(Boolean);
 
 /* ---------- API ---------- */
@@ -314,6 +325,7 @@ async function main() {
     const roleByEmail = Object.fromEntries(people.map((p) => [p.email, p.role]));
     const nameByEmail = Object.fromEntries(people.map((p) => [p.email, p.name]));
     selfReports = parseCsv(await readSource(opts.reports))
+      .map((r) => ({ ...r, date: normalizeDate(r.date) }))
       .filter((r) => r.date && r.date >= addDays(START, -7) && r.date <= addDays(END, 7))
       .map((r) => {
         const email = String(r.email || "").toLowerCase();
@@ -342,8 +354,9 @@ async function main() {
   let training = [];
   if (opts.attendance) {
     training = parseCsv(await readSource(opts.attendance))
+      .map((r) => ({ ...r, date: normalizeDate(r.date) }))
       .filter((r) => r.date && r.email)
-      .map((r) => ({ date: r.date.slice(0, 10), session: r.session || "Training session", email: r.email.toLowerCase() }));
+      .map((r) => ({ date: r.date, session: r.session || "Training session", email: r.email.toLowerCase() }));
     log(`Training attendance: ${training.length} rows`);
   }
 

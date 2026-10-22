@@ -90,7 +90,7 @@ Then show exactly what would be shared, as the row below, and ask: "Share this w
 
 ### 5. Share only with permission
 
-- **share:** append the row to the sheet with the Google Sheets connector, using the columns above in that order. Confirm in one line when it's done. If the Sheets connector isn't available or the write fails, give the person the row as one CSV line in a code block and ask them to paste it into the sheet themselves.
+- **share:** append the row to the sheet with the Google Sheets connector, using the columns above in that order. Write the date as text with a leading apostrophe (`'2026-10-22`); otherwise Google Sheets turns it into a date serial number such as 46317. Read the row back to check it, then confirm in one line when it's done. If the Sheets connector isn't available or the write fails, give the person the row as one CSV line in a code block and ask them to paste it into the sheet themselves.
 - **edit:** apply their changes, show the row again, and ask again.
 - **keep private:** confirm nothing was shared. The summary is theirs to keep.
 

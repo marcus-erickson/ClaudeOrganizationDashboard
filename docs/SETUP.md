@@ -54,11 +54,12 @@ Use the skill name as it appears in the Analytics API (`skill_name`, or `skill_d
 
    `data/self-reports.example.csv` has a sample row. `categories` holds `Category=count` pairs separated by `; `, and `features` and `top_tasks` are lists separated by `; `.
 
-2. Share the sheet so everyone who will run the skill can edit it.
-3. Open `skills/claude-self-report/SKILL.md`, paste the sheet URL into **Organization settings**, and make sure the category list matches `categories` in `config.js` exactly.
-4. Install the skill for your organization. See [Installing the self-report skill](#installing-the-self-report-skill) below.
-5. Announce it. A monthly nudge from managers works well, for example at the first one-on-one of the month. People need the Google Sheets connector connected for the skill to add their row; without it, the skill gives them a CSV line to paste into the sheet.
-6. For the build script, either download the sheet as CSV to `data/self-reports.csv`, or publish it as CSV (File > Share > Publish to web > CSV) and pass that URL. A published URL is readable by anyone who has it, so only do that if your sheet holds nothing sensitive and your organization allows it.
+2. Select column A (date) and choose **Format > Number > Plain text**, so dates stay as `2026-10-22` instead of turning into serial numbers. The skill also writes the date as text, and the build script can read either.
+3. Share the sheet so everyone who will run the skill can edit it.
+4. Open `skills/claude-self-report/SKILL.md`, paste the sheet URL into **Organization settings**, and make sure the category list matches `categories` in `config.js` exactly.
+5. Install the skill for your organization. See [Installing the self-report skill](#installing-the-self-report-skill) below.
+6. Announce it. A monthly nudge from managers works well, for example at the first one-on-one of the month. People need the Google Sheets connector connected for the skill to add their row; without it, the skill gives them a CSV line to paste into the sheet.
+7. For the build script, either download the sheet as CSV to `data/self-reports.csv`, or publish it as CSV (File > Share > Publish to web > CSV) and pass that URL. A published URL is readable by anyone who has it, so only do that if your sheet holds nothing sensitive and your organization allows it.
 
 ### Installing the self-report skill
 
