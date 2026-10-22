@@ -345,10 +345,33 @@ async function main() {
           features: splitList(r.features),
           topTasks: splitList(r.top_tasks),
           fellShort: r.fell_short || "",
-          hoursSaved: r.hours_saved === undefined || r.hours_saved === "" ? null : Number(r.hours_saved)
+          hoursSaved: r.hours_saved === undefined || r.hours_saved === "" ? null : Number(r.hours_saved),
+          scope: (r.scope || "main").toLowerCase(),
+          projectsActive: r.projects_active === undefined || r.projects_active === "" ? null : Number(r.projects_active)
         };
       });
-    log(`Self-reports: ${selfReports.length} in this period`);
+    // Combine each person's Project runs into their main run for the period.
+    const byPerson = new Map();
+    for (const r of selfReports) {
+      const key = r.email || r.name;
+      const g = byPerson.get(key);
+      if (!g) { byPerson.set(key, r); continue; }
+      const main = g.scope === "project" && r.scope !== "project" ? r : g;
+      const extra = main === g ? r : g;
+      main.chats += extra.chats;
+      main.activeDays = Math.max(main.activeDays || 0, extra.activeDays || 0) || null;
+      for (const [c, n] of Object.entries(extra.categories)) main.categories[c] = (main.categories[c] || 0) + n;
+      main.features = [...new Set(main.features.concat(extra.features))];
+      main.topTasks = [...new Set(main.topTasks.concat(extra.topTasks))].slice(0, 5);
+      if (!main.fellShort && extra.fellShort) main.fellShort = extra.fellShort;
+      if (main.hoursSaved == null) main.hoursSaved = extra.hoursSaved;
+      main.projectRuns = (main.projectRuns || 0) + (extra.scope === "project" ? 1 : 0);
+      if (extra.date > main.date) main.date = extra.date;
+      byPerson.set(key, main);
+    }
+    const rows = selfReports.length;
+    selfReports = [...byPerson.values()];
+    log(`Self-reports: ${selfReports.length} people in this period (${rows} rows, Project runs combined)`);
   }
 
   let training = [];

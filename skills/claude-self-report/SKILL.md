@@ -48,7 +48,14 @@ Use your chat history tools (for example recent chats and conversation search) t
 Tell the person in one line what you could see, for example "I found 63 chats from Sep 20 to Oct 19." Mention these limits when they apply:
 
 - If chat history search is turned off, say that the report needs it on (Settings) and stop.
-- Chat history tools only see chats in the current scope. If you are running inside a Project, you only see that Project's chats; outside a Project, you may not see chats inside Projects. Say which scope you covered and suggest running the report outside any Project for the fullest picture.
+- Chat search only sees one area at a time: outside a Project it sees chats outside Projects, and inside a Project it sees only that Project's chats. Nothing can read every Project from one place.
+
+**Decide which kind of run this is:**
+
+- **Main run** (outside any Project): the full report, both questions, and the `scope` column set to `main`.
+- **Project run** (inside a Project): count this Project's chats only, skip both questions, and set `scope` to `project`. The dashboard adds Project runs to the person's main run for the same month, so they never need to combine anything by hand.
+
+**On a main run, check for Projects.** If you have a memory tool that lists Project memory (for example paths under `/projects/`), use it to find the Projects with memory updated in the last 30 days. Updated memory means the Project was used, though it says nothing about how much. Tell the person, for example: "You also worked in 5 Projects this month: Gazette, Digital Brain, CEO Interviews, Chasing 1000 and AI Context Vault. Chats inside them aren't counted here. To include them, open each one you use for work and say 'run my Claude self-report' there. It takes about a minute each." Record the number of Projects in `projects_active`. Never put Project names in the shared row. If you can't see Project memory, ask the person whether they do much work in Projects and give the same instructions.
 
 ### 2. Sort and count
 
@@ -57,7 +64,7 @@ Tell the person in one line what you could see, for example "I found 63 chats fr
 - Note which features showed up at least once: web search, file uploads, artifacts, Projects, a company skill, a connector.
 - Pick the person's top 3 repeated tasks: kinds of work that came up in several chats. Word each one generically, in under 10 words, starting with a verb ending in -ing.
 
-### 3. Ask two questions, one at a time
+### 3. Ask two questions, one at a time (main run only)
 
 First ask: "Where did Claude fall short for you this month? One sentence is plenty, or say skip." Wait for the answer. Strip any names or identifying details from it before it goes in the summary, and tell the person if you changed it.
 
@@ -65,7 +72,9 @@ Then ask: "Roughly how many hours did Claude save you this month? A gut feel is 
 
 ### 4. Show the summary
 
-Show the person their month in this shape:
+On a Project run, show a short version: the chat count and categories for this Project, the features used, and any repeated tasks, then the row. Skip the tip.
+
+On a main run, show the person their month in this shape:
 
 **Your Claude month** (start date to end date, N chats on N days)
 
@@ -78,15 +87,17 @@ Show the person their month in this shape:
 
 Then show exactly what would be shared, as the row below, and ask: "Share this with your team? (share / edit / keep private)"
 
-| date | email | name | role | chats | active_days | categories | features | top_tasks | fell_short | hours_saved |
-|---|---|---|---|---|---|---|---|---|---|---|
+| date | email | name | role | chats | active_days | categories | features | top_tasks | fell_short | hours_saved | scope | projects_active |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
 
 - `date`: today, YYYY-MM-DD
 - `email`, `name`: the person's own. Ask for their role if you don't know it.
 - `categories`: `Category=count` pairs separated by `; `, Personal included as a count only
 - `features`, `top_tasks`: values separated by `; `
 - `fell_short`: their cleaned-up answer, or empty
-- `hours_saved`: a whole number, or empty
+- `hours_saved`: a whole number, or empty (always empty on a Project run)
+- `scope`: `main` or `project`
+- `projects_active`: on a main run, the number of Projects used this month, or empty if unknown; empty on a Project run
 
 ### 5. Share only with permission
 
