@@ -1,0 +1,95 @@
+---
+name: claude-self-report
+description: Summarize how I used Claude over the last 30 days (work categories, features, repeated tasks) without sharing chat content, show me the summary, and only with my OK add one row to the team's self-report sheet. Use when someone says "run my Claude self-report", "my Claude month", or "share my Claude usage".
+---
+
+# Claude self-report
+
+You help one person see how they used Claude over the last 30 days, then, only if they agree, add a short anonymized-by-design summary to their organization's shared self-report sheet. The summary feeds the Claude Organization Dashboard, which uses it to find common tasks worth turning into shared skills and to plan training.
+
+The person is in control the whole time. Nothing leaves this chat until they say "share".
+
+## Organization settings
+
+An admin fills these in before publishing the skill to the organization. Keep the category list identical to `categories` in the dashboard's `config.js`.
+
+- **Self-report sheet:** [PASTE THE GOOGLE SHEET URL HERE]
+- **Sheet tab name:** Reports
+- **Categories** (use exactly these names):
+  - Contracts and specs
+  - Emails and meeting notes
+  - RFIs and submittals
+  - Daily reports and field notes
+  - Estimating and bid review
+  - Change orders
+  - Safety
+  - Schedules and lookaheads
+  - Learning
+  - Other (work that fits none of the above)
+  - Personal (anything not about work)
+- **Features to check for:** Web search, File uploads, Artifacts, Projects, Company skills, Connectors
+
+## Privacy rules
+
+These rules are not optional, and they apply to everything that would be shared:
+
+1. Never include chat titles, quotes, file names or any wording copied from a chat.
+2. Never include names of people, clients, owners, projects, jobs, addresses or dollar amounts. Describe tasks generically, for example "Drafting RFIs from field questions", not "RFI 42 for the Main St. hospital".
+3. Personal chats are counted under "Personal" and nothing else about them is recorded or described, not even in the summary shown to the person.
+4. Only the person's own chats are read. Never look up anyone else.
+5. If the person says to keep it private, or doesn't answer, do not write anything to the sheet.
+
+## Steps
+
+### 1. Gather the last 30 days
+
+Use your chat history tools (for example recent chats and conversation search) to list the person's chats from the last 30 days. Page back until you reach chats older than 30 days or run out. Work from chat titles and summaries; you do not need to open full transcripts.
+
+Tell the person in one line what you could see, for example "I found 63 chats from Sep 20 to Oct 19." Mention these limits when they apply:
+
+- If chat history search is turned off, say that the report needs it on (Settings) and stop.
+- Chat history tools only see chats in the current scope. If you are running inside a Project, you only see that Project's chats; outside a Project, you may not see chats inside Projects. Say which scope you covered and suggest running the report outside any Project for the fullest picture.
+
+### 2. Sort and count
+
+- Put each chat into exactly one category from the list above. When a chat spans two, pick the main purpose.
+- Count chats per category, and the number of distinct days with at least one chat.
+- Note which features showed up at least once: web search, file uploads, artifacts, Projects, a company skill, a connector.
+- Pick the person's top 3 repeated tasks: kinds of work that came up in several chats. Word each one generically, in under 10 words, starting with a verb ending in -ing.
+
+### 3. Ask one question
+
+Ask: "Where did Claude fall short for you this month? One sentence is plenty, or say skip." Wait for the answer. Strip any names or identifying details from it before it goes in the summary, and tell the person if you changed it.
+
+### 4. Show the summary
+
+Show the person their month in this shape:
+
+**Your Claude month** (start date to end date, N chats on N days)
+
+- What you used it for: each category with its count, highest first
+- Features you used, and features you didn't use
+- Tasks you repeat: the three tasks
+- Where Claude fell short: their answer
+- One tip for next month: one specific, practical suggestion based on what you saw. For example, if they uploaded the same kind of document many times and never used Projects, suggest a Project. If they never used a connector, suggest connecting the tool their documents live in. Keep it to two sentences.
+
+Then show exactly what would be shared, as the row below, and ask: "Share this with your team? (share / edit / keep private)"
+
+| date | email | name | role | chats | active_days | categories | features | top_tasks | fell_short |
+|---|---|---|---|---|---|---|---|---|---|
+
+- `date`: today, YYYY-MM-DD
+- `email`, `name`: the person's own. Ask for their role if you don't know it.
+- `categories`: `Category=count` pairs separated by `; `, Personal included as a count only
+- `features`, `top_tasks`: values separated by `; `
+- `fell_short`: their cleaned-up answer, or empty
+
+### 5. Share only with permission
+
+- **share:** append the row to the sheet with the Google Sheets connector, using the columns above in that order. Confirm in one line when it's done. If the Sheets connector isn't available or the write fails, give the person the row as one CSV line in a code block and ask them to paste it into the sheet themselves.
+- **edit:** apply their changes, show the row again, and ask again.
+- **keep private:** confirm nothing was shared. The summary is theirs to keep.
+
+## Style
+
+Write plainly and briefly. No flattery, no em dashes, and no strings of very short sentences. Ask questions one at a time.

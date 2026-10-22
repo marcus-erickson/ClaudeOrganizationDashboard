@@ -147,3 +147,9 @@ vite.config.ts.timestamp-*
 
 # Turbo Repo
 .turbo
+
+# Claude Organization Dashboard: your organization's real data. Never commit.
+data/live-data.js
+data/roster.csv
+data/self-reports.csv
+*.local.csv
