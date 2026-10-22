@@ -54,8 +54,37 @@ Use the skill name as it appears in the Analytics API (`skill_name`, or `skill_d
 
 2. Share the sheet so everyone who will run the skill can edit it.
 3. Open `skills/claude-self-report/SKILL.md`, paste the sheet URL into **Organization settings**, and make sure the category list matches `categories` in `config.js` exactly.
-4. Publish the skill to your organization (as an organization skill or in a plugin), and announce it. A monthly nudge from managers works well, for example at the first one-on-one of the month.
-5. For the build script, either download the sheet as CSV to `data/self-reports.csv`, or publish it as CSV (File > Share > Publish to web > CSV) and pass that URL. A published URL is readable by anyone who has it, so only do that if your sheet holds nothing sensitive and your organization allows it.
+4. Install the skill for your organization. See [Installing the self-report skill](#installing-the-self-report-skill) below.
+5. Announce it. A monthly nudge from managers works well, for example at the first one-on-one of the month. People need the Google Sheets connector connected for the skill to add their row; without it, the skill gives them a CSV line to paste into the sheet.
+6. For the build script, either download the sheet as CSV to `data/self-reports.csv`, or publish it as CSV (File > Share > Publish to web > CSV) and pass that URL. A published URL is readable by anyone who has it, so only do that if your sheet holds nothing sensitive and your organization allows it.
+
+### Installing the self-report skill
+
+Claude installs skills from a ZIP file of the skill's folder. The folder must keep the name `claude-self-report`, matching the `name` in `SKILL.md`.
+
+**1. Package it** after you've edited `SKILL.md`:
+
+- macOS or Linux, from the repository folder:
+
+  ```bash
+  cd skills && zip -r ../claude-self-report.zip claude-self-report && cd ..
+  ```
+
+- Windows: open the `skills` folder, right-click the `claude-self-report` folder, and choose **Send to > Compressed (zipped) folder** (or **Compress to ZIP file** on Windows 11).
+
+**2. Test it on your own account first.** In Claude, go to **Customize > Skills**, click **+**, choose **Create skill > Upload a skill**, and select the ZIP. Then ask Claude to "run my Claude self-report". Delete or turn off your personal copy once the organization copy is installed.
+
+**3. Provision it to everyone** (an Owner does this; Team and Enterprise plans):
+
+1. Go to **Organization settings > Plugins & skills**.
+2. On the **Policy** tab, check that **Cloud code execution and file creation** and **Skills** are both on. Skills don't run without code execution.
+3. Click **Add > Upload a skill** and select the ZIP.
+
+The skill is turned on for everyone right away, and each person can turn it off for themselves. To give it only to certain groups instead, Enterprise plans can bundle it into a plugin assigned to those groups.
+
+**4. Updating it:** edit `SKILL.md`, zip the folder again, and upload the new ZIP in the same place.
+
+Anthropic's guides: [Provision and manage skills for your organization](https://support.claude.com/en/articles/13119606-provision-and-manage-skills-for-your-organization) and [Use skills in Claude](https://support.claude.com/en/articles/12512180-use-skills-in-claude).
 
 ## 5. Build the data
 
