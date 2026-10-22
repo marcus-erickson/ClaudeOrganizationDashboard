@@ -32,6 +32,19 @@ open index.html        # macOS. On Windows: start index.html
 
 To host it, turn on GitHub Pages for your copy (Settings > Pages > Deploy from branch > `main` / root). Only do that with sample data. Your real data contains names and should stay internal (see [Privacy](#privacy)).
 
+## Set it up for your organization
+
+**Who you need:** one person to own the rollout (an AI lead or champion), your Claude **Primary Owner** for about five minutes to create the API key, and someone comfortable running a Node.js script. Plan on an afternoon the first time. Most of it goes to step 3.
+
+1. **Try the sample.** Open `index.html` and click through every tab so you know what you're setting up. *(10 minutes, anyone)*
+2. **Make a private copy.** Clone this repository into a private repo or an internal folder. Your live data will contain names, so don't build it inside a public fork. *(AI lead)*
+3. **Adapt it to your organization.** In `config.js`, set your organization name, the 8 to 10 work categories people will report against, your company skills and who each one is for, and the coaching thresholds. In `data/program.js`, rewrite the coaching wording, repeated-task themes, role tracks and champions. See [docs/CUSTOMIZE.md](docs/CUSTOMIZE.md), which includes starter category lists for law, healthcare, agencies and general offices. *(AI lead)*
+4. **Create an Analytics API key** with the `read:analytics` scope at claude.ai > Organization settings > API. Requires Claude Enterprise. See [SETUP step 1](docs/SETUP.md#1-create-an-analytics-api-key). *(Primary Owner)*
+5. **Build the roster.** Copy `data/roster.example.csv` to `data/roster.csv` and list everyone with a seat: email, name, role, and `pending` for unaccepted invites. Use the same role names as in step 3. See [SETUP step 2](docs/SETUP.md#2-make-the-roster). *(AI lead or IT)*
+6. **Roll out the self-report** (optional, recommended). Create the shared Google Sheet, paste its URL and your category list into `skills/claude-self-report/SKILL.md`, and publish the skill to your organization. See [SETUP step 4](docs/SETUP.md#4-set-up-self-reports-optional-recommended). *(AI lead and Claude admin)*
+7. **Build the live data and host it internally.** Run `node scripts/build-data.mjs --roster data/roster.csv --reports data/self-reports.csv`, check that the header says **Live data**, and put the folder somewhere only coaches and managers can open. Schedule the script to run nightly. See [SETUP steps 5 and 6](docs/SETUP.md#5-build-the-data). *(Whoever runs scripts)*
+8. **Launch.** Tell everyone what is tracked and why, ask managers to have people run the self-report at their first one-on-one of the month, and hold a monthly review of the coaching queue and skill opportunities. *(AI lead and managers)*
+
 ## Where the data comes from
 
 The dashboard combines two sources:
@@ -41,7 +54,7 @@ The dashboard combines two sources:
 
 ![Use cases and skill opportunities](docs/images/use-cases.png)
 
-`scripts/build-data.mjs` pulls both into `data/live-data.js`, and the dashboard picks that file up automatically. See **[docs/SETUP.md](docs/SETUP.md)** for the step-by-step guide.
+`scripts/build-data.mjs` pulls both into `data/live-data.js`, and the dashboard picks that file up automatically. [docs/SETUP.md](docs/SETUP.md) covers the details, including the data file format if you want to feed it from your own warehouse instead.
 
 You need a Claude Enterprise plan for the Analytics API, and the Primary Owner has to create the API key.
 
