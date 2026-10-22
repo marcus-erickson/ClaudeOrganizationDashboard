@@ -4,6 +4,8 @@ A coaching dashboard for organizations rolling out Claude. It shows who is getti
 
 It is a single static page (HTML, CSS and plain JavaScript with no build step and no dependencies) that runs from a folder, an internal web server or GitHub Pages.
 
+> **Status: early release.** The dashboard is tested end to end with the sample data. The data script (`scripts/build-data.mjs`) follows Anthropic's [Analytics API reference](https://platform.claude.com/docs/en/api/beta/organization/analytics) and has been tested against a mock of that API, but not yet against a live Claude Enterprise organization. It prints a short list of checks at the end of every run. If you try it on your organization, please [open an issue](https://github.com/marcus-erickson/ClaudeOrganizationDashboard/issues) with what you see, especially any check marked `!`.
+
 <table>
   <tr>
     <td width="33%"><img src="docs/images/1-start-here.jpg" alt="Start here this week: the five people most worth a conversation, with why and a suggested action"></td>

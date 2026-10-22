@@ -108,6 +108,8 @@ Useful options:
 | `--since YYYY-MM-DD` | `launchDate` in config.js | Start of the monthly history |
 | `--out <path>` | `data/live-data.js` | Output file |
 
+At the end, the script prints a short list of checks: how many roster emails matched activity, whether `last_activity_date` was returned, which company skills were found, and so on. Look at anything marked `!` before trusting the dashboard. If your organization hasn't turned on last-activity reporting, the script works out each person's last active day from weekly activity instead, accurate to the week.
+
 Open `index.html`. The header now says **Live data**. Delete or rename `data/live-data.js` to go back to the sample.
 
 What the script pulls:
