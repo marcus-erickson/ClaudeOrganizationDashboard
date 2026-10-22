@@ -215,3 +215,51 @@ label { font-size: 13px; font-weight: 600; }
   body { background: #fff; }
   .card { break-inside: avoid; }
 }
+
+/* ---------- focus model and rollout additions ---------- */
+:root {
+  --next: #0F6E6A;
+  --next-soft: #E3F4F2;
+  --stage-0: #DCE0E7;
+  --stage-1: #C9D6FF;
+  --stage-2: #9DB3F5;
+  --stage-3: #6E8EEB;
+  --stage-4: #3F66DE;
+  --stage-5: #1C3BA3;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --next: #6FD3CB;
+    --next-soft: #163936;
+    --stage-0: #353B46;
+    --stage-1: #263566;
+    --stage-2: #33489A;
+    --stage-3: #4A68D6;
+    --stage-4: #7D9BFF;
+    --stage-5: #B4C6FF;
+  }
+}
+.pill-next { background: var(--next-soft); color: var(--next); }
+.count-next { background: var(--next-soft); color: var(--next); }
+.group-h { font-size: 13px; font-weight: 700; color: var(--text-2); text-transform: uppercase; letter-spacing: .05em; margin-top: 4px; }
+.ladder-step.optional { border: 1px dashed var(--border); background: var(--surface-2); }
+.ladder-step.optional .ev { color: var(--muted); font-weight: 500; }
+.ladder-step.is-next { border: 2px solid var(--next); }
+.subcard.later { background: var(--surface); }
+
+.stack-chart { display: flex; align-items: flex-end; gap: 10px; min-height: 250px; padding-top: 8px; border-bottom: 1px solid var(--border); overflow-x: auto; }
+.stack-col { flex: 1 0 34px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 4px; }
+.stack { width: 100%; max-width: 64px; display: flex; flex-direction: column; border-radius: 4px 4px 0 0; overflow: hidden; }
+.stack-col > .small:last-child { padding-top: 4px; }
+.stk { display: block; width: 100%; }
+.stk.s0 { background: var(--stage-0); }
+.stk.s1 { background: var(--stage-1); }
+.stk.s2 { background: var(--stage-2); }
+.stk.s3 { background: var(--stage-3); }
+.stk.s4 { background: var(--stage-4); }
+.stk.s5 { background: var(--stage-5); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: var(--text-2); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+.ladder-step.todo .ev { color: var(--muted); font-weight: 500; }
+.ladder-step.is-next .ev { color: var(--next); font-weight: 600; }

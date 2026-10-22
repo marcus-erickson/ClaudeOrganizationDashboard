@@ -7,7 +7,8 @@ This guide takes you from sample data to your own organization's numbers. Plan o
 - A **Claude Enterprise** plan. The Analytics API is only available on Enterprise.
 - The **Primary Owner** of your Claude organization, to create the API key.
 - **Node.js 18 or newer** on the machine that builds the data.
-- A **roster** of everyone with a seat: email, name and role.
+- A **roster** of everyone with a seat: email, name, role and, ideally, the date each seat was assigned.
+- Optional: a **training attendance** list (date, session, email) for the training impact view.
 - Optional: a **Google Sheet** for self-reports, and the Google Sheets connector enabled for your organization.
 
 ## 1. Create an Analytics API key
@@ -25,13 +26,14 @@ Things to know about the API:
 Copy `data/roster.example.csv` to `data/roster.csv` and list everyone with a seat:
 
 ```csv
-email,name,role,status
-dana.whitfield@yourco.com,Dana Whitfield,Project Manager,active
-jordan.ellis@yourco.com,Jordan Ellis,Superintendent,pending
+email,name,role,status,seat_date
+dana.whitfield@yourco.com,Dana Whitfield,Project Manager,active,2026-01-12
+jordan.ellis@yourco.com,Jordan Ellis,Superintendent,pending,2026-09-28
 ```
 
 - `role` drives role medians, role tracks, skill audiences and the heat map. Use the same role names in `config.js` (`companySkills` audiences) and `data/program.js` (track `roles`).
 - `status` is optional. Use `pending` for people whose invite hasn't been accepted.
+- `seat_date` is optional but recommended. It's the day the person got their seat, and the Rollout tab uses it for seat counts by month and "time to first use". Without it, seats are counted from each person's first active week.
 - You can export this from your HR system, your identity provider (SCIM), or the member list in Claude's admin settings.
 
 People who show up in the Analytics API but not in the roster are still included, with the role "Unassigned".
@@ -47,7 +49,7 @@ Use the skill name as it appears in the Analytics API (`skill_name`, or `skill_d
 1. Create a Google Sheet with a tab named `Reports` and this header row:
 
    ```
-   date,email,name,role,chats,active_days,categories,features,top_tasks,fell_short
+   date,email,name,role,chats,active_days,categories,features,top_tasks,fell_short,hours_saved
    ```
 
    `data/self-reports.example.csv` has a sample row. `categories` holds `Category=count` pairs separated by `; `, and `features` and `top_tasks` are lists separated by `; `.
@@ -90,8 +92,10 @@ Anthropic's guides: [Provision and manage skills for your organization](https://
 
 ```bash
 export ANTHROPIC_ANALYTICS_KEY=sk-ant-...
-node scripts/build-data.mjs --roster data/roster.csv --reports data/self-reports.csv
+node scripts/build-data.mjs --roster data/roster.csv --reports data/self-reports.csv --attendance data/attendance.csv
 ```
+
+Set `launchDate` in `config.js` first, so the history starts when your rollout did. A full year of history takes about two minutes, because the script spaces its requests to stay under the API's rate limit.
 
 Useful options:
 
@@ -100,6 +104,8 @@ Useful options:
 | `--end YYYY-MM-DD` | two days ago | Last day of the period |
 | `--days 30` | `periodDays` in config.js | Period length |
 | `--reports <path or URL>` | none | Self-report CSV |
+| `--attendance <path>` | none | Training attendance CSV: `date,session,email` (see `data/attendance.example.csv`) |
+| `--since YYYY-MM-DD` | `launchDate` in config.js | Start of the monthly history |
 | `--out <path>` | `data/live-data.js` | Output file |
 
 Open `index.html`. The header now says **Live data**. Delete or rename `data/live-data.js` to go back to the sample.
@@ -108,11 +114,28 @@ What the script pulls:
 
 | Endpoint | Used for |
 |---|---|
-| `/v1/organizations/analytics/users` (this period, previous period, last 8 weeks) | Chats, messages, Projects, artifacts, files, connector counts, last active date, trend, "slowing down" |
-| `/v1/organizations/analytics/skills` grouped by user | Company skills each person ran, and total runs per skill |
+| `/v1/organizations/analytics/users` (this period, previous period, each week and each month since launch) | Chats, messages, Projects, artifacts, files, connector counts, last active date, first active week, weekly trend, monthly adoption, "slowing down" |
+| `/v1/organizations/analytics/skills` grouped by user (this period and each month) | Company skills each person ran, and total runs per skill |
 | `/v1/organizations/analytics/connectors` grouped by user | Connector names per person, if available. Skipped quietly if not. |
 
 The users and skills endpoints and their fields are documented in the [Analytics API reference](https://platform.claude.com/docs/en/api/beta/organization/analytics). If the connectors endpoint path or fields differ for your organization, the script falls back to connector counts and the dashboard still works.
+
+### Training attendance
+
+Keep a simple CSV of who attended each session:
+
+```csv
+date,session,email
+2026-04-21,One Project per job,tom.becker@yourco.com
+```
+
+The Rollout tab compares attendees with people at the same starting stage who didn't attend, and shows how many in each group moved up a stage within `trainingWindowMonths` (two by default). People choose to attend, so treat the gap as a signal rather than proof.
+
+### History limits
+
+- The Analytics API has engagement data from January 1, 2026. If you launched earlier, history starts there and early adopters will look like they started in January.
+- Roles come from today's roster, so someone who changed roles shows in their current role across the whole history.
+- First active dates are accurate to the week.
 
 ## 6. Refresh it automatically
 
@@ -142,15 +165,21 @@ window.COACHING_DATA = {
     projects: 6, artifacts: 31, filesUploaded: 40,
     connectorNames: ["Google Drive"], connectorCount: 1,
     skillNames: ["rfi-drafter"],   // company skills only
-    weeklyChats: [30, 28, 31, 31, 34, 36, 35, 37]   // 8 weeks, oldest first
+    weeklyChats: [30, 28, 31, 31, 34, 36, 35, 37],  // 8 weeks, oldest first
+    seatDate: "2026-01-12", firstActive: "2026-01-13",
+    // one entry per month in "months": [chats, messages, projects, connectors, company skills, artifacts], or null before the seat
+    monthly: [[40, 300, 1, 0, 0, 2], [95, 820, 3, 2, 1, 12]]
   }],
+  months: ["2026-09", "2026-10"],
+  training: [{ date: "2026-04-21", session: "One Project per job", email: "tom@yourco.com" }],
   selfReports: [{
     date: "2026-10-09", email: "tom@yourco.com", name: "Tom Becker", role: "Project Engineer",
     chats: 63, activeDays: 17,
     categories: { "RFIs and submittals": 24, "Personal": 2 },
     features: ["Web search", "File uploads"],
     topTasks: ["Drafting RFIs from field questions"],
-    fellShort: "It doesn't know our job's specs unless I upload them."
+    fellShort: "It doesn't know our job's specs unless I upload them.",
+    hoursSaved: 6
   }]
 };
 ```

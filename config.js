@@ -77,7 +77,23 @@ window.COACHING_CONFIG = {
     taskOpportunityMinPeople: 4,  // repeated task reported by this many people = worth a skill
     championTopPct: 10,           // top share of active people by chats...
     championMinStage: 4,          // ...who have also reached this adoption stage
-    powerUserMinArtifacts: 5      // artifacts needed for stage 5
+    powerUserMinArtifacts: 5,     // artifacts needed for stage 5
+    newSeatGraceDays: 21,         // no "next step" nudges until someone has used Claude this long
+    startHereCount: 5,            // people shown in "Start here this week" on the overview
+    trainingWindowMonths: 2       // months after a session to check whether attendees moved up a stage
+  },
+
+  // When your Claude rollout started (YYYY-MM-DD). The Rollout tab and
+  // scripts/build-data.mjs start their history here. The Analytics API has
+  // data from 2026-01-01 onward, so earlier dates are moved up to that day.
+  launchDate: "2026-01-12",
+
+  // Ladder steps a role doesn't need. Those steps are skipped when working out
+  // the person's stage, and they are never nudged about them.
+  // Step names: "projects", "connectors", "skills", "artifacts".
+  roleOptionalSteps: {
+    "Superintendent": ["connectors"],
+    "Safety Manager": ["connectors"]
   },
 
   // Adoption ladder. Each step is reached when the test is true, and a person's

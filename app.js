@@ -19,7 +19,10 @@
   }
 
   var T = C.thresholds;
-  var WARN_FLAGS = ["pending", "inactive", "slowing", "oneShot", "noProjects", "noConnectors", "noSkills"];
+  var ATTENTION = ["slowing", "oneShot", "inactive", "pending"];          // problems, in priority order
+  var NEXT = ["nextProjects", "nextConnectors", "nextSkills", "nextBuild"]; // growth, one rung at a time
+  var STEP_KEYS = ["chats", "projects", "connectors", "skills", "artifacts"];
+  var NEXT_FOR_STEP = { projects: "nextProjects", connectors: "nextConnectors", skills: "nextSkills", artifacts: "nextBuild" };
   var FEATURES = ["Web search", "File uploads", "Artifacts", "Projects", "Company skills", "Connectors"];
 
   /* ---------- small helpers ---------- */
@@ -29,15 +32,18 @@
       .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   }
-  function parseDay(s) { var p = s.split("-"); return new Date(Date.UTC(+p[0], +p[1] - 1, +p[2])); }
+  function parseDay(s) { var p = s.split("-"); return new Date(Date.UTC(+p[0], +p[1] - 1, +(p[2] || 1))); }
   function dayDiff(a, b) { return Math.round((parseDay(a) - parseDay(b)) / 86400000); }
   var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   function fmtDay(s) { if (!s) return ""; var d = parseDay(s); return MONTHS[d.getUTCMonth()] + " " + d.getUTCDate(); }
+  function fmtMonth(m) { var d = parseDay(m + "-01"); return MONTHS[d.getUTCMonth()]; }
+  function fmtMonthYear(m) { var d = parseDay(m + "-01"); return MONTHS[d.getUTCMonth()] + " " + d.getUTCFullYear(); }
   function addDays(s, n) { var d = parseDay(s); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
+  function monthEnd(m) { var d = parseDay(m + "-01"); d.setUTCMonth(d.getUTCMonth() + 1); d.setUTCDate(0); return d.toISOString().slice(0, 10); }
   function pct(n, d) { return d ? Math.round((n / d) * 100) : 0; }
   function median(arr) {
     var a = arr.filter(function (x) { return typeof x === "number" && !isNaN(x); }).sort(function (x, y) { return x - y; });
-    if (!a.length) return 0;
+    if (!a.length) return null;
     var m = Math.floor(a.length / 2);
     return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
   }
@@ -46,18 +52,12 @@
   function fill(text, vars) {
     return String(text || "").replace(/\{(\w+)\}/g, function (m, k) { return vars[k] != null ? vars[k] : m; });
   }
-  function lastActiveText(p) {
-    if (p.status === "pending") return "Never";
-    if (p.days == null) return "No activity";
-    if (p.days <= 0) return "Today";
-    if (p.days === 1) return "Yesterday";
-    return p.days + " days ago";
-  }
   function plural(n, one, many) { return n + " " + (n === 1 ? one : (many || one + "s")); }
   function textMatches(text, words) {
     var t = String(text || "").toLowerCase();
     return words.some(function (w) { return t.indexOf(String(w).toLowerCase()) !== -1; });
   }
+  function signed(n) { return (n > 0 ? "+" : "") + n; }
 
   var store = {
     mem: {},
@@ -94,11 +94,26 @@
     } else { fallback(); }
   }
 
+  /* ---------- adoption ladder ---------- */
+
+  function isOptional(role, key) { return ((C.roleOptionalSteps || {})[role] || []).indexOf(key) !== -1; }
+  function stepMet(v, key) { return key === "artifacts" ? (v.artifacts || 0) >= T.powerUserMinArtifacts : (v[key] || 0) > 0; }
+  function stageOf(v, role) {
+    if (!(v.chats > 0)) return 0;
+    var n = 1;
+    for (var i = 1; i < STEP_KEYS.length; i++) {
+      if (stepMet(v, STEP_KEYS[i]) || isOptional(role, STEP_KEYS[i])) n = i + 1; else break;
+    }
+    return n;
+  }
+  function monthVals(row) { return row ? { chats: row[0], projects: row[2], connectors: row[3], skills: row[4], artifacts: row[5] } : null; }
+
   /* ---------- model ---------- */
 
   var END = D.periodEnd;
   var START = D.periodStart || addDays(END, -(C.periodDays - 1));
   var EMAIL_TO_ID = {};
+  var HIST = (D.months || []).slice();
 
   var people = D.people.map(function (raw) {
     var p = Object.assign({}, raw);
@@ -113,11 +128,12 @@
     p.mpc = p.chats ? p.messages / p.chats : 0;
     p.isPending = p.status === "pending";
     p.isActive = !p.isPending && p.chats > 0 && p.days != null && p.days < T.inactiveDays;
-    p.steps = [p.chats > 0, p.projects > 0, p.connectors > 0, p.skills > 0, p.artifacts >= T.powerUserMinArtifacts];
-    if (!p.isActive) { p.stage = 0; }
-    else { p.stage = 1; for (var i = 1; i < 5; i++) { if (p.steps[i]) p.stage = i + 1; else break; } }
+    p.stepDone = STEP_KEYS.map(function (k) { return stepMet(p, k); });
+    p.stage = p.isActive ? stageOf(p, p.role) : 0;
     p.stageName = p.isPending ? "Invite pending" : (p.stage === 0 ? "Inactive" : C.stages[p.stage - 1].name);
     p.weeklyActive = (p.weeklyChats[p.weeklyChats.length - 1] || 0) > 0;
+    p.daysUsing = p.firstActive ? Math.max(0, dayDiff(END, p.firstActive)) : null;
+    p.isNew = p.isActive && p.daysUsing != null && p.daysUsing < T.newSeatGraceDays;
     return p;
   });
   var byId = {};
@@ -131,18 +147,16 @@
   ranked.slice(0, topN).forEach(function (p) { topIds[p.id] = true; });
 
   people.forEach(function (p) {
-    var f = {};
-    f.pending = p.isPending;
-    f.inactive = !p.isPending && !p.isActive;
-    f.slowing = p.isActive && p.prevChats >= T.slowingMinPriorChats && p.chats <= p.prevChats * (1 - T.slowingDropPct / 100);
-    f.oneShot = p.isActive && p.chats >= T.oneShotMinChats && p.mpc < T.oneShotMaxMessagesPerChat;
-    f.noProjects = p.isActive && p.projects === 0;
-    f.noConnectors = p.isActive && p.connectors === 0;
-    f.noSkills = p.isActive && p.skills === 0;
-    f.champion = !!topIds[p.id] && p.stage >= T.championMinStage;
-    p.flags = f;
-    p.warnFlags = WARN_FLAGS.filter(function (k) { return f[k]; });
-    p.needsCoaching = p.warnFlags.length > 0;
+    var a = {};
+    a.pending = p.isPending;
+    a.inactive = !p.isPending && !p.isActive;
+    a.slowing = p.isActive && p.prevChats >= T.slowingMinPriorChats && p.chats <= p.prevChats * (1 - T.slowingDropPct / 100);
+    a.oneShot = p.isActive && p.chats >= T.oneShotMinChats && p.mpc < T.oneShotMaxMessagesPerChat;
+    p.attention = ATTENTION.filter(function (k) { return a[k]; });
+    p.next = null;
+    if (p.isActive && !p.isNew && p.stage < 5) p.next = NEXT_FOR_STEP[STEP_KEYS[p.stage]] || null;
+    p.focus = p.attention[0] || p.next || null;
+    p.champion = !!topIds[p.id] && p.stage >= T.championMinStage;
   });
 
   var METRICS = [
@@ -155,7 +169,7 @@
   ];
   function medians(list) {
     var m = {};
-    METRICS.forEach(function (x) { m[x.key] = median(list.map(function (p) { return p[x.key]; })); });
+    METRICS.forEach(function (x) { m[x.key] = median(list.map(function (p) { return p[x.key]; })) || 0; });
     return m;
   }
   var coMed = medians(active);
@@ -225,46 +239,78 @@
     for (var i = 1; i <= 5; i++) s += '<span class="' + (i <= n ? "on" : "") + '"></span>';
     return s + "</span>";
   }
-  function flagPills(p) {
+  function focusLabel(p, k) {
+    if (k === "inactive") return p.days == null ? "No activity" : "Inactive " + p.days + " days";
+    return P.coaching[k].label;
+  }
+  function focusPill(p) {
     var h = "";
-    if (p.flags.champion) h += '<span class="pill pill-accent">' + esc(P.coaching.champion.label) + "</span>";
-    p.warnFlags.forEach(function (k) {
-      var label = P.coaching[k].label;
-      if (k === "inactive") label = p.days == null ? "No activity" : "Inactive " + p.days + " days";
-      h += '<span class="pill pill-warn">' + esc(label) + "</span>";
-    });
-    return '<div class="chips" style="gap:4px">' + (h || '<span class="muted small">None</span>') + "</div>";
+    if (p.champion) h += '<span class="pill pill-accent">' + esc(P.coaching.champion.label) + "</span>";
+    if (p.focus) {
+      var att = P.coaching[p.focus].group === "attention";
+      h += '<span class="pill ' + (att ? "pill-warn" : "pill-next") + '">' + esc(focusLabel(p, p.focus)) + "</span>";
+      var more = p.attention.length - (att ? 1 : 0);
+      if (more > 0) h += '<span class="small muted" title="' + esc(p.attention.slice(att ? 1 : 0).map(function (k) { return P.coaching[k].label; }).join(", ")) + '">+' + more + "</span>";
+    }
+    if (p.isNew) h += '<span class="pill pill-muted" title="Using Claude for less than ' + T.newSeatGraceDays + ' days, so no next-step nudges yet">New</span>';
+    return '<div class="chips" style="gap:4px;align-items:center">' + (h || '<span class="muted small">On track</span>') + "</div>";
   }
   function bar(share, cls) {
     return '<div class="bar ' + (cls || "") + '"><span style="width:' + Math.max(0, Math.min(100, share)) + '%"></span></div>';
   }
-  function thresholdVars() {
-    var v = Object.assign({}, T);
-    v.inactiveDays = T.inactiveDays;
-    return v;
-  }
-  function emailsFor(list) {
-    return list.map(function (p) { return p.email; }).filter(Boolean).join(", ");
-  }
+  function thresholdVars() { return Object.assign({}, T); }
+  function emailsFor(list) { return list.map(function (p) { return p.email; }).filter(Boolean).join(", "); }
+
   function flagFilter(key) {
     if (key === "all") return function () { return true; };
-    if (key === "coach") return function (p) { return p.needsCoaching; };
-    if (key === "champ" || key === "champion") return function (p) { return p.flags.champion; };
-    if (key === "idle") return function (p) { return p.flags.inactive || p.flags.pending; };
+    if (key === "attention") return function (p) { return p.attention.length > 0; };
+    if (key === "next") return function (p) { return p.focus && NEXT.indexOf(p.focus) !== -1; };
+    if (key === "new") return function (p) { return p.isNew; };
+    if (key === "champ" || key === "champion") return function (p) { return p.champion; };
     if (key === "stage-0") return function (p) { return !p.isActive; };
     if (/^stage-\d$/.test(key)) { var n = +key.slice(6); return function (p) { return p.isActive && (n === 4 ? p.stage >= 4 : p.stage === n); }; }
-    if (P.coaching[key]) return function (p) { return !!p.flags[key]; };
+    if (P.coaching[key]) return function (p) { return p.focus === key; };
     if (key.indexOf("role:") === 0) { var r = key.slice(5); return function (p) { return p.role === r; }; }
     return function () { return true; };
   }
   function filterLabel(key) {
     if (P.coaching[key]) return P.coaching[key].label;
-    if (/^stage-\d$/.test(key)) { var n = +key.slice(6); return n === 0 ? "Inactive or pending" : (n === 4 ? "Reusing and power users" : C.stages[n - 1].name); }
+    if (key === "stage-0") return "Inactive or pending";
+    if (/^stage-\d$/.test(key)) { var n = +key.slice(6); return n === 4 ? "Reusing and power users" : C.stages[n - 1].name; }
     if (key.indexOf("role:") === 0) return key.slice(5);
     return key;
   }
 
-  /* ---------- views ---------- */
+  /* ---------- overview ---------- */
+
+  function startHere() {
+    var list = people.filter(function (p) { return p.attention.length; });
+    list.sort(function (a, b) {
+      var d = ATTENTION.indexOf(a.attention[0]) - ATTENTION.indexOf(b.attention[0]);
+      if (d) return d;
+      var k = a.attention[0];
+      if (k === "slowing") return b.prevChats - a.prevChats;
+      if (k === "oneShot") return b.chats - a.chats;
+      if (k === "inactive") return (a.days == null ? 9999 : a.days) - (b.days == null ? 9999 : b.days);
+      return 0;
+    });
+    return list.slice(0, T.startHereCount);
+  }
+
+  function queueCard(k) {
+    var tv = thresholdVars();
+    var list = k === "champion" ? people.filter(function (p) { return p.champion; }) : people.filter(function (p) { return p.focus === k; });
+    if (!list.length && k === "pending") return "";
+    var q = P.coaching[k].queue;
+    var grp = P.coaching[k].group;
+    var cls = grp === "attention" ? "count-warn" : (grp === "next" ? "count-next" : "count-good");
+    return '<div class="subcard"><div class="card-title"><span class="count ' + cls + '">' + list.length + "</span>" + esc(P.coaching[k].label) + "</div>" +
+      '<div class="small muted">' + esc(fill(q.signal, tv)) + "</div>" +
+      '<div class="small"><span class="strong">Action: </span>' + esc(fill(q.action, tv)) + "</div>" +
+      '<div class="actions" style="margin-top:auto">' +
+      (list.length ? '<button type="button" class="btn btn-primary" data-action="copy-emails" data-filter="' + k + '" title="' + esc(q.cta) + ': copies the email addresses of everyone in this group">Copy emails</button>' : "") +
+      '<a class="btn" href="#/people?f=' + k + '">See people</a></div></div>';
+  }
 
   function viewOverview() {
     var pending = people.filter(function (p) { return p.isPending; }).length;
@@ -286,22 +332,20 @@
       return '<div class="kpi"><div class="label">' + esc(k[0]) + '</div><div class="value">' + esc(k[1]) + '</div><div class="sub">' + esc(k[2]) + "</div></div>";
     }).join("") + "</section>";
 
-    // Coaching queue
-    var tv = thresholdVars();
-    var keys = WARN_FLAGS.concat(["champion"]);
-    var cards = keys.map(function (k) {
-      var list = people.filter(function (p) { return p.flags[k]; });
-      if (!list.length && k === "pending") return "";
-      var q = P.coaching[k].queue;
-      var good = k === "champion";
-      return '<div class="subcard"><div class="card-title"><span class="count ' + (good ? "count-good" : "count-warn") + '">' + list.length + "</span>" + esc(P.coaching[k].label) + "</div>" +
-        '<div class="small muted">' + esc(fill(q.signal, tv)) + "</div>" +
-        '<div class="small"><span class="strong">Action: </span>' + esc(fill(q.action, tv)) + "</div>" +
-        '<div class="actions" style="margin-top:auto">' +
-        (list.length ? '<button type="button" class="btn btn-primary" data-action="copy-emails" data-filter="' + k + '" title="' + esc(q.cta) + ': copies the email addresses of everyone with this flag">Copy emails</button>' : "") +
-        '<a class="btn" href="#/people?f=' + k + '">See people</a></div></div>';
-    }).join("");
-    h += '<section class="card" aria-labelledby="q-h"><div class="section-head"><h2 id="q-h">Coaching queue</h2><span class="note">Each card is a rule. Copy the emails to send the action to everyone at once, or open the list.</span></div><div class="grid grid-cards">' + cards + "</div></section>";
+    // Start here this week
+    var sh = startHere();
+    var attentionTotal = people.filter(function (p) { return p.attention.length; }).length;
+    h += '<section class="card" aria-labelledby="sh-h"><div class="section-head"><h2 id="sh-h">Start here this week</h2><span class="note">The ' + sh.length + " people most worth a conversation, out of " + attentionTotal + ' who need attention. People slowing down come first because they\'re the easiest to win back.</span><a class="btn" href="#/people?f=attention">All who need attention</a></div>' +
+      (sh.length ? '<div class="table-box"><table class="wide-600"><thead><tr><th scope="col">Person</th><th scope="col">Why now</th><th scope="col">Suggested action</th></tr></thead><tbody>' + sh.map(function (p) {
+        var plan = planFor(p)[0];
+        return '<tr style="vertical-align:top"><td style="white-space:nowrap"><a class="strong" href="#/person/' + encodeURIComponent(p.id) + '">' + esc(p.name) + '</a><div class="small muted">' + esc(p.role) + "</div></td>" +
+          '<td><span class="pill pill-warn">' + esc(focusLabel(p, p.focus)) + '</span><div class="small text-2" style="margin-top:4px">' + esc(plan.why) + '</div></td><td class="small">' + esc(plan.action) + "</td></tr>";
+      }).join("") + "</tbody></table></div>" : '<div class="empty">Nobody needs attention right now.</div>') + "</section>";
+
+    // Coaching queue: attention first, then next steps
+    h += '<section class="card" aria-labelledby="q-h"><div class="section-head"><h2 id="q-h">Coaching queue</h2><span class="note">Each person appears once, under their single focus: a problem to fix first, or else the next rung on the ladder. New users get ' + T.newSeatGraceDays + ' days before any next-step nudge.</span></div>' +
+      '<h3 class="group-h">Needs attention</h3><div class="grid grid-cards">' + ATTENTION.map(queueCard).join("") + "</div>" +
+      '<h3 class="group-h">Ready for a next step</h3><div class="grid grid-cards">' + NEXT.map(queueCard).join("") + queueCard("champion") + "</div></section>";
 
     // What people use Claude for
     var ct = categoryTotals(reports);
@@ -344,6 +388,8 @@
     return h;
   }
 
+  /* ---------- people ---------- */
+
   var peopleState = { sort: "chats", dir: -1, q: "" };
 
   function peopleRows(filterKey) {
@@ -372,18 +418,25 @@
         '<td class="num">' + p.artifacts + '</td><td class="num">' + p.skills + '</td><td class="num">' + p.connectors + "</td>" +
         '<td class="small text-2" style="white-space:nowrap">' + (r ? "Shared " + esc(fmtDay(r.date)) : "Not yet") + "</td>" +
         '<td style="white-space:nowrap"><span style="display:inline-flex;align-items:center;gap:8px">' + seg(p.stage) + '<span class="small">' + esc(p.stageName) + "</span></span></td>" +
-        "<td>" + flagPills(p) + "</td></tr>";
+        "<td>" + focusPill(p) + "</td></tr>";
     }).join("");
+  }
+  function lastActiveText(p) {
+    if (p.status === "pending") return "Never";
+    if (p.days == null) return "No activity";
+    if (p.days <= 0) return "Today";
+    if (p.days === 1) return "Yesterday";
+    return p.days + " days ago";
   }
 
   var COLS = [
     ["name", "Person"], ["days", "Last active"], ["chats", "Chats", 1], ["mpc", "Msgs / chat", 1], ["projects", "Projects", 1],
-    ["artifacts", "Artifacts", 1], ["skills", "Company skills", 1], ["connectors", "Connectors", 1], [null, "Self-report"], ["stage", "Stage"], [null, "Coaching flags"]
+    ["artifacts", "Artifacts", 1], ["skills", "Company skills", 1], ["connectors", "Connectors", 1], [null, "Self-report"], ["stage", "Stage"], [null, "Focus"]
   ];
 
   function viewPeople(params) {
     var fk = params.f || "all";
-    var std = [["all", "Everyone"], ["coach", "Needs coaching"], ["champ", "Champions"], ["idle", "Inactive seats"]];
+    var std = [["all", "Everyone"], ["attention", "Needs attention"], ["next", "Ready for a next step"], ["new", "New users"], ["champ", "Champions"]];
     var chips = std.map(function (c) {
       var n = people.filter(flagFilter(c[0])).length;
       return '<button type="button" class="chip" data-action="filter" data-filter="' + c[0] + '" aria-pressed="' + (fk === c[0]) + '">' + esc(c[1]) + " (" + n + ")</button>";
@@ -399,7 +452,7 @@
       var aria = sorted ? (peopleState.dir === 1 ? "ascending" : "descending") : "none";
       return "<th scope=\"col\"" + cls + ' aria-sort="' + aria + '"><button type="button" data-action="sort" data-key="' + c[0] + '">' + c[1] + (sorted ? (peopleState.dir === 1 ? " ▲" : " ▼") : "") + "</button></th>";
     }).join("");
-    return '<div class="page-head"><h1>People</h1><p>Click anyone to open their coaching plan. Click a column heading to sort.</p></div>' +
+    return '<div class="page-head"><h1>People</h1><p>Each person has one focus: a problem to fix first, or the next rung on the ladder. Click anyone to open their coaching plan.</p></div>' +
       '<section class="card" aria-label="People list"><div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px 16px">' +
       '<div class="chips" role="group" aria-label="Filter people">' + chips + "</div>" +
       '<div style="margin-left:auto;display:flex;flex-wrap:wrap;align-items:center;gap:8px"><label for="search" class="muted" style="font-weight:500">Search</label>' +
@@ -410,25 +463,30 @@
       '<div class="small muted" id="people-count">Showing ' + list.length + " of " + people.length + " seats.</div></section>";
   }
 
+  /* ---------- person ---------- */
+
   function planFor(p) {
     var ru = roleUsage(p.role, p.id).filter(function (u) { return u.kind === "Skill"; });
-    var roleSkill = ru.length ? ru[0].name : ((D.skills || [])[0] || {}).name || "a company skill";
+    var roleSkill = ru.length ? ru[0].name : ((D.skills || C.companySkills || [])[0] || {}).name || "a company skill";
     var vars = Object.assign(thresholdVars(), {
-      name: p.name, firstName: p.name.split(" ")[0], role: p.role, chats: p.chats, mpc: fmt1(p.mpc),
+      name: p.name, firstName: p.name.split(" ")[0], role: p.role, chats: p.chats, prevChats: p.prevChats, mpc: fmt1(p.mpc),
       days: p.days == null ? "30+" : p.days, roleSkill: roleSkill, roleSkillUsers: ru.length ? ru[0].users + " of " + ru[0].of : "others"
     });
-    var keys = p.warnFlags.slice();
-    if (p.flags.champion) keys.push("champion");
-    return keys.map(function (k) {
+    var keys = [];
+    if (p.focus) keys.push(p.focus);
+    p.attention.forEach(function (k) { if (keys.indexOf(k) === -1) keys.push(k); });
+    if (p.next && keys.indexOf(p.next) === -1) keys.push(p.next);
+    if (p.champion) keys.push("champion");
+    return keys.map(function (k, i) {
       var t = P.coaching[k].plan;
-      return { key: k, title: fill(t.title, vars), why: fill(t.why, vars), action: fill(t.action, vars), cta: fill(t.cta, vars) };
+      return { key: k, now: i === 0, title: fill(t.title, vars), why: fill(t.why, vars), action: fill(t.action, vars), cta: fill(t.cta, vars) };
     });
   }
 
   function planText(p, plan) {
     var lines = ["Claude coaching plan: " + p.name + " (" + p.role + ")", "Stage: " + p.stageName, ""];
     plan.forEach(function (a, i) {
-      lines.push((i + 1) + ". " + a.title);
+      lines.push((i === 0 ? "Focus now: " : "Later: ") + a.title);
       lines.push("   What we see: " + a.why);
       lines.push("   Next step: " + a.action);
     });
@@ -447,63 +505,70 @@
     var h = '<a href="#/people" class="btn btn-link" style="align-self:flex-start">← All people</a>';
     h += '<section class="card" aria-label="Person summary" style="flex-direction:row;flex-wrap:wrap;align-items:center;gap:20px 32px">' +
       '<div class="avatar" aria-hidden="true">' + esc(initials(p.name)) + "</div>" +
-      '<div style="flex:1 1 280px"><h1 style="font-size:26px">' + esc(p.name) + '</h1><div class="muted" style="margin-top:2px">' + esc(p.role) + " · Last active " + esc(lastActiveText(p).toLowerCase()) + " · Self-report: " + (r ? "shared " + esc(fmtDay(r.date)) : "not shared") + "</div></div>" +
+      '<div style="flex:1 1 280px"><h1 style="font-size:26px">' + esc(p.name) + '</h1><div class="muted" style="margin-top:2px">' + esc(p.role) + " · Last active " + esc(lastActiveText(p).toLowerCase()) +
+      (p.firstActive ? " · Using Claude since " + esc(fmtDay(p.firstActive)) : "") + " · Self-report: " + (r ? "shared " + esc(fmtDay(r.date)) : "not shared") + "</div></div>" +
       '<div style="display:flex;flex-direction:column;gap:6px;min-width:220px"><div class="small muted" style="font-weight:500">Adoption stage</div><div style="display:flex;align-items:center;gap:10px">' + seg(p.stage, true) + '<span class="strong">' + esc(p.stageName) + " (" + p.stage + " of 5)</span></div></div>" +
       '<div class="actions">' +
-      (p.email ? '<a class="btn btn-primary btn-lg" href="mailto:' + esc(p.email) + "?subject=" + encodeURIComponent("Getting more out of Claude") + "&body=" + encodeURIComponent(planText(p, plan)) + '">Email coaching note</a>' : "") +
-      '<button type="button" class="btn btn-lg" data-action="copy-plan" data-id="' + esc(p.id) + '">Copy plan</button></div></section>';
+      (p.email && plan.length ? '<a class="btn btn-primary btn-lg" href="mailto:' + esc(p.email) + "?subject=" + encodeURIComponent("Getting more out of Claude") + "&body=" + encodeURIComponent(planText(p, plan)) + '">Email coaching note</a>' : "") +
+      (plan.length ? '<button type="button" class="btn btn-lg" data-action="copy-plan" data-id="' + esc(p.id) + '">Copy plan</button>' : "") + "</div></section>";
 
     h += '<section class="card" aria-labelledby="lad-h"><h2 id="lad-h">Adoption ladder</h2><div class="grid grid-ladder">' + C.stages.map(function (s, i) {
+      var key = STEP_KEYS[i];
+      var opt = i > 0 && isOptional(p.role, key);
       var ev = [
         p.chats ? p.chats + " chats this period" : "No chats this period",
         p.projects ? plural(p.projects, "Project") + " used" : "No Projects used",
         p.connectors ? (p.connectorNames.length ? p.connectorNames.join(", ") : plural(p.connectors, "connector")) : "No connectors used",
         p.skills ? p.skillNames.join(", ") : "No company skills run",
-        p.artifacts + " artifacts created" + (p.steps[4] ? "" : " (needs " + T.powerUserMinArtifacts + ")")
+        p.artifacts + " artifacts created" + (p.stepDone[4] ? "" : " (needs " + T.powerUserMinArtifacts + ")")
       ][i];
-      var ok = p.steps[i];
-      return '<div class="ladder-step ' + (ok ? "done" : "todo") + '"><div style="display:flex;align-items:center;gap:8px">' +
-        (ok ? '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent)" role="img" aria-label="Reached"><path d="M20 6L9 17l-5-5"/></svg>'
-          : '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--muted)" role="img" aria-label="Not yet"><circle cx="12" cy="12" r="8"/></svg>') +
-        '<span class="strong">' + (i + 1) + ". " + esc(s.step) + '</span></div><div class="small text-2">' + esc(s.desc) + '</div><div class="ev">' + esc(ev) + "</div></div>";
+      var ok = p.stepDone[i];
+      var cls = ok ? "done" : (opt ? "optional" : "todo");
+      if (!ok && opt) ev = "Optional for " + p.role.toLowerCase() + "s";
+      var icon = ok
+        ? '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent)" role="img" aria-label="Reached"><path d="M20 6L9 17l-5-5"/></svg>'
+        : '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--muted)" role="img" aria-label="' + (opt ? "Optional" : "Not yet") + '"><circle cx="12" cy="12" r="8"/></svg>';
+      var isNext = p.next && NEXT_FOR_STEP[key] === p.next;
+      return '<div class="ladder-step ' + cls + (isNext ? " is-next" : "") + '"><div style="display:flex;align-items:center;gap:8px">' + icon +
+        '<span class="strong">' + (i + 1) + ". " + esc(s.step) + "</span></div>" + (isNext ? '<span class="pill pill-next" style="align-self:flex-start">Next step</span>' : "") +
+        '<div class="small text-2">' + esc(s.desc) + '</div><div class="ev">' + esc(ev) + "</div></div>";
     }).join("") + "</div></section>";
 
-    h += '<section aria-labelledby="met-h" style="display:flex;flex-direction:column;gap:12px"><div class="section-head"><h2 id="met-h">Compared with the company</h2><span class="note">Their number, then the median for active people company-wide and in their role.</span></div><div class="grid grid-kpi">' +
+    h += '<section aria-labelledby="met-h" style="display:flex;flex-direction:column;gap:12px"><div class="section-head"><h2 id="met-h">Their numbers in context</h2><span class="note">Medians for active people, company-wide and in their role. Use these to start a conversation, not to grade.</span></div><div class="grid grid-kpi">' +
       METRICS.map(function (m) {
-        var v = p[m.key], f = function (x) { return m.dec ? (x ? fmt1(x) : "–") : String(Math.round(x * 10) / 10); };
-        var cmp = v > coMed[m.key] ? '<span class="compare" style="color:var(--accent-strong)">Above median</span>' : (v < coMed[m.key] ? '<span class="compare" style="color:var(--warn)">Below median</span>' : "");
-        return '<div class="kpi"><div class="label">' + m.label + '</div><div style="display:flex;align-items:baseline;gap:8px"><span class="value" style="font-size:26px">' + f(v) + "</span>" + cmp + '</div><div class="sub">Company ' + f(coMed[m.key]) + " · Role " + f(rm[m.key]) + "</div></div>";
+        var f = function (x) { return m.dec ? (x ? fmt1(x) : "–") : String(Math.round(x * 10) / 10); };
+        return '<div class="kpi"><div class="label">' + m.label + '</div><div class="value" style="font-size:26px">' + f(p[m.key]) + '</div><div class="sub">Company ' + f(coMed[m.key]) + " · Role " + f(rm[m.key]) + "</div></div>";
       }).join("") + "</div></section>";
 
     var doneCount = plan.filter(function (a) { return done[a.key]; }).length;
-    var planHtml = plan.length ? plan.map(function (a, i) {
+    var planHtml = plan.length ? plan.map(function (a) {
       var isDone = !!done[a.key];
-      return '<div class="subcard"><div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px"><span class="small strong muted">Step ' + (i + 1) + '</span><span class="strong" style="font-size:15px;flex:1 1 240px">' + esc(a.title) + "</span>" +
-        (isDone ? '<span class="pill pill-accent">Done</span>' : (a.key === "champion" ? '<span class="pill pill-accent">Opportunity</span>' : '<span class="pill pill-warn">Open</span>')) + "</div>" +
+      var tag = a.key === "champion" ? '<span class="pill pill-accent">Recognition</span>' : (a.now ? '<span class="pill pill-warn">Focus now</span>' : '<span class="pill pill-muted">Later</span>');
+      return '<div class="subcard' + (a.now ? "" : " later") + '"><div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px"><span class="strong" style="font-size:15px;flex:1 1 240px">' + esc(a.title) + "</span>" +
+        (isDone ? '<span class="pill pill-accent">Done</span>' : tag) + "</div>" +
         '<div class="small text-2"><span class="strong">What we see: </span>' + esc(a.why) + '</div><div class="small text-2"><span class="strong">Suggested action: </span>' + esc(a.action) + "</div>" +
         '<div class="actions"><button type="button" class="btn" data-action="toggle-done" data-id="' + esc(p.id) + '" data-key="' + a.key + '">' + (isDone ? "Reopen" : "Mark done") + "</button></div></div>";
-    }).join("") : '<div class="empty">No coaching flags this period. Consider asking ' + esc(p.name.split(" ")[0]) + " to help a teammate.</div>";
+    }).join("") : '<div class="empty">' + (p.isNew ? esc(p.name.split(" ")[0]) + " started recently. Give them " + T.newSeatGraceDays + " days before nudging the next step." : "Nothing to coach right now. Consider asking " + esc(p.name.split(" ")[0]) + " to help a teammate.") + "</div>";
 
-    var labels = [];
-    for (var w = 0; w < 8; w++) labels.push(addDays(END, -7 * (8 - w) + 1));
     var wk = p.weeklyChats.length ? p.weeklyChats : [0, 0, 0, 0, 0, 0, 0, 0];
     var mx = Math.max.apply(null, wk.concat([1]));
     var chart = '<div class="chart" role="img" aria-label="Chats per week for the last ' + wk.length + ' weeks: ' + wk.join(", ") + '">' + wk.map(function (v, i) {
       return '<div class="col' + (i < wk.length - 4 ? " prev" : "") + '"><span>' + v + '</span><div style="height:' + Math.round(v / mx * 95) + 'px"></div></div>';
-    }).join("") + '</div><div style="display:flex;justify-content:space-between" class="small muted"><span>' + esc(fmtDay(labels[0])) + "</span><span>" + esc(fmtDay(labels[7])) + '</span></div><div class="small muted">Lighter bars are the previous period.</div>';
+    }).join("") + '</div><div style="display:flex;justify-content:space-between" class="small muted"><span>' + esc(fmtDay(addDays(END, -55))) + "</span><span>" + esc(fmtDay(addDays(END, -6))) + '</span></div><div class="small muted">Lighter bars are the previous period.</div>';
 
     var ru = roleUsage(p.role, p.id).slice(0, 5);
     var ruHtml = ru.length ? ru.map(function (u) {
       var mine = u.kind === "Skill" ? p.skillNames.indexOf(u.name) !== -1 : p.connectorNames.indexOf(u.name) !== -1;
-      return '<div style="display:flex;align-items:center;gap:10px"><span class="mono" style="flex:1 1 auto">' + esc(u.name) + '</span><span class="small muted">' + u.kind + '</span><span class="small strong" style="white-space:nowrap">' + u.users + " of " + u.of + "</span>" + (mine ? '<span class="pill pill-accent">Uses</span>' : '<span class="pill pill-muted">Not yet</span>') + "</div>";
+      return '<div style="display:flex;align-items:center;gap:8px"><span class="mono" style="flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis" title="' + esc(u.name) + '">' + esc(u.name) + '</span><span class="small muted">' + u.kind + '</span><span class="small strong" style="white-space:nowrap">' + u.users + " of " + u.of + "</span>" + (mine ? '<span class="pill pill-accent">Uses</span>' : '<span class="pill pill-muted">Not yet</span>') + "</div>";
     }).join("") : '<div class="small muted">Nobody else in this role yet.</div>';
 
     var rep = r ? (function () {
       var top = Object.keys(r.categories || {}).filter(function (c) { return c !== "Personal"; }).sort(function (a, b) { return r.categories[b] - r.categories[a]; }).slice(0, 3);
-      return '<div class="small"><span class="strong">Top uses: </span>' + esc(top.join(", ")) + '</div><div class="small"><span class="strong">Repeats: </span>' + esc((r.topTasks || []).join("; ")) + '</div><div class="small"><span class="strong">Fell short: </span>' + esc(r.fellShort || "") + '</div><a href="#/report/' + encodeURIComponent(p.id) + '" class="small">See the full self-report</a>';
+      return '<div class="small"><span class="strong">Top uses: </span>' + esc(top.join(", ")) + '</div><div class="small"><span class="strong">Repeats: </span>' + esc((r.topTasks || []).join("; ")) + '</div><div class="small"><span class="strong">Fell short: </span>' + esc(r.fellShort || "") + "</div>" +
+        (r.hoursSaved != null ? '<div class="small"><span class="strong">Time saved: </span>about ' + esc(r.hoursSaved) + " hours</div>" : "") + '<a href="#/report/' + encodeURIComponent(p.id) + '" class="small">See the full self-report</a>';
     })() : '<div class="small muted">Not shared this period. Use cases only show up when people choose to share.</div>';
 
-    h += '<div class="row"><section class="card grow" aria-labelledby="plan-h"><div class="section-head"><h2 id="plan-h">Coaching plan</h2><span class="note">' + doneCount + " of " + plan.length + " done. Saved in this browser.</span></div>" + planHtml + "</section>" +
+    h += '<div class="row"><section class="card grow" aria-labelledby="plan-h"><div class="section-head"><h2 id="plan-h">Coaching plan</h2><span class="note">' + (plan.length ? "One focus now, the rest later. " + doneCount + " of " + plan.length + " done, saved in this browser." : "") + "</span></div>" + planHtml + "</section>" +
       '<div class="side"><section class="card" aria-labelledby="wk-h" style="gap:10px"><h2 id="wk-h">Chats per week</h2>' + chart + "</section>" +
       '<section class="card" aria-labelledby="rp-h" style="gap:8px"><h2 id="rp-h">From their self-report</h2>' + rep + "</section>" +
       '<section class="card" aria-labelledby="tm-h" style="gap:10px"><h2 id="tm-h">Others in this role use</h2>' + ruHtml + "</section>" +
@@ -513,6 +578,163 @@
       '<div class="actions"><button type="button" class="btn" data-action="save-note" data-id="' + esc(p.id) + '">Save note</button><span class="small muted" style="align-self:center">Notes stay in this browser.</span></div></section></div></div>';
     return h;
   }
+
+  /* ---------- rollout ---------- */
+
+  function rolloutModel() {
+    if (!HIST.length || !people.some(function (p) { return p.monthly; })) return null;
+    var last = HIST.length - 1;
+    var partial = monthEnd(HIST[last]) > END;
+    var cmp = partial && last > 0 ? last - 1 : last;          // latest complete month
+    function seatDate(p) { return p.seatDate || p.firstActive || null; }
+    function hasSeat(p, i) { var s = seatDate(p); return !!s && s <= monthEnd(HIST[i]); }
+    function stageAt(p, i) { var row = p.monthly && p.monthly[i]; return row ? stageOf(monthVals(row), p.role) : 0; }
+    var months = HIST.map(function (m, i) {
+      var seats = people.filter(function (p) { return hasSeat(p, i); });
+      var counts = [0, 0, 0, 0, 0, 0];
+      seats.forEach(function (p) { counts[stageAt(p, i)]++; });
+      return { m: m, seats: seats.length, counts: counts, active: seats.length - counts[0], partial: i === last && partial };
+    });
+    return { months: months, last: last, cmp: cmp, stageAt: stageAt, seatDate: seatDate };
+  }
+
+  function trainingImpact(R) {
+    var rows = {};
+    (D.training || []).forEach(function (t) {
+      var k = t.date + "|" + t.session;
+      (rows[k] = rows[k] || { date: t.date, session: t.session, ids: {} }).ids[EMAIL_TO_ID[String(t.email || "").toLowerCase()] || ""] = true;
+    });
+    var W = T.trainingWindowMonths;
+    var pooled = { a: 0, am: 0, c: 0, cm: 0 };
+    var list = Object.keys(rows).map(function (k) { return rows[k]; }).sort(function (a, b) { return a.date < b.date ? -1 : 1; }).map(function (s) {
+      var si = HIST.indexOf(s.date.slice(0, 7));
+      var out = { date: s.date, session: s.session, attendees: Object.keys(s.ids).filter(Boolean).length };
+      if (si < 0) { out.note = "Outside the history"; return out; }
+      var bi = Math.max(0, si - 1), li = si + W;
+      if (li > R.cmp) { out.note = "Too soon to tell"; return out; }
+      var base = {}, att = [], comp = [];
+      people.forEach(function (p) {
+        var b = R.stageAt(p, bi);
+        if (b < 1 || b >= 5) return;
+        if (s.ids[p.id]) { att.push(p); base[b] = true; }
+      });
+      people.forEach(function (p) { var b = R.stageAt(p, bi); if (!s.ids[p.id] && base[b] && b >= 1 && b < 5) comp.push(p); });
+      function moved(list) { return list.filter(function (p) { return R.stageAt(p, li) > R.stageAt(p, bi); }).length; }
+      out.n = att.length; out.moved = moved(att); out.cn = comp.length; out.cmoved = moved(comp);
+      out.rate = pct(out.moved, out.n); out.crate = pct(out.cmoved, out.cn);
+      pooled.a += out.n; pooled.am += out.moved; pooled.c += out.cn; pooled.cm += out.cmoved;
+      return out;
+    });
+    return { sessions: list, rate: pct(pooled.am, pooled.a), crate: pct(pooled.cm, pooled.c), n: pooled.a };
+  }
+
+  function viewRollout() {
+    var h = '<div class="page-head"><h1>Is the rollout working?</h1><p>How adoption has grown since launch, how quickly new people get going, whether they stick with it, and whether training moves people up the ladder.</p></div>';
+    var R = rolloutModel();
+    if (!R) return h + '<div class="card"><div class="empty">No history yet. scripts/build-data.mjs adds monthly history from the Analytics API. See docs/SETUP.md.</div></div>';
+    var M = R.months, c = R.cmp, b = Math.max(0, c - 3);
+    var stage3 = function (x) { return x.counts[3] + x.counts[4] + x.counts[5]; };
+
+    // Time to first use
+    var waits = [], notYet = 0;
+    people.forEach(function (p) {
+      if (!p.seatDate) return;
+      if (p.firstActive) waits.push(Math.max(0, dayDiff(p.firstActive, p.seatDate))); else notYet++;
+    });
+    var medWait = median(waits);
+
+    // Hours saved
+    var hrs = reports.filter(function (r) { return r.hoursSaved != null && r.hoursSaved !== ""; }).map(function (r) { return +r.hoursSaved; });
+    var hrsTotal = hrs.reduce(function (a, x) { return a + x; }, 0);
+    var TI = trainingImpact(R);
+
+    var kpis = [
+      ["Active share of seats", pct(M[c].active, M[c].seats) + "%", fmtMonth(M[c].m) + " · " + signed(pct(M[c].active, M[c].seats) - pct(M[b].active, M[b].seats)) + " pts since " + fmtMonth(M[b].m)],
+      ["At stage 3 or above", stage3(M[c]), pct(stage3(M[c]), M[c].seats) + "% of seats · " + signed(stage3(M[c]) - stage3(M[b])) + " since " + fmtMonth(M[b].m)],
+      ["Days to first use", medWait == null ? "–" : Math.round(medWait), "Median from seat to first chat" + (notYet ? " · " + notYet + " not started" : "")],
+      ["Moved up after training", TI.n ? TI.rate + "%" : "–", TI.n ? "vs " + TI.crate + "% of similar people who didn't attend" : "Add an attendance file to measure this"],
+      ["Hours saved, self-reported", hrs.length ? Math.round(hrsTotal) : "–", hrs.length ? "From " + plural(hrs.length, "report") + " · median " + fmt1(median(hrs)) + " per person" : "Ask for it in the self-report"]
+    ];
+    h += '<section aria-label="Rollout numbers" class="grid grid-kpi">' + kpis.map(function (k) {
+      return '<div class="kpi"><div class="label">' + esc(k[0]) + '</div><div class="value">' + esc(k[1]) + '</div><div class="sub">' + esc(k[2]) + "</div></div>";
+    }).join("") + "</section>";
+
+    // Adoption chart
+    var maxSeats = Math.max.apply(null, M.map(function (x) { return x.seats; }).concat([1]));
+    var H = 220;
+    var cols = M.map(function (x) {
+      var segs = "";
+      for (var s = 5; s >= 1; s--) if (x.counts[s]) segs += '<div class="stk s' + s + '" style="height:' + (x.counts[s] / maxSeats * H) + 'px" title="' + esc(C.stages[s - 1].name + ": " + x.counts[s]) + '"></div>';
+      var idle = x.counts[0];
+      return '<div class="stack-col"><span class="small muted">' + x.seats + '</span><div class="stack" style="height:' + (x.seats / maxSeats * H) + 'px">' +
+        (idle ? '<div class="stk s0" style="height:' + (idle / maxSeats * H) + 'px" title="Not active: ' + idle + '"></div>' : "") + segs + "</div>" +
+        '<span class="small">' + esc(fmtMonth(x.m)) + (x.partial ? "*" : "") + "</span></div>";
+    }).join("");
+    var legend = '<div class="legend">' + [0, 1, 2, 3, 4, 5].map(function (s) {
+      return '<span><i class="stk s' + s + '"></i>' + esc(s ? s + ". " + C.stages[s - 1].name : "Has a seat, not active") + "</span>";
+    }).join("") + "</div>";
+    var first = M[0];
+    var summary = "Seats grew from " + first.seats + " in " + fmtMonth(first.m) + " to " + M[c].seats + " in " + fmtMonth(M[c].m) + ". " +
+      pct(M[c].active, M[c].seats) + "% were active in " + fmtMonth(M[c].m) + ", and " + stage3(M[c]) + " people had reached stage 3 or above.";
+    var tableRows = M.map(function (x) {
+      return "<tr><td>" + esc(fmtMonthYear(x.m)) + (x.partial ? " (partial)" : "") + '</td><td class="num">' + x.seats + '</td><td class="num">' + x.active + '</td><td class="num">' + pct(x.active, x.seats) + "%</td>" +
+        [1, 2, 3, 4, 5].map(function (s) { return '<td class="num">' + x.counts[s] + "</td>"; }).join("") + "</tr>";
+    }).join("");
+    h += '<section class="card" aria-labelledby="ad-h"><div class="section-head"><h2 id="ad-h">Adoption by month</h2><span class="note">Everyone with a seat each month, by the stage they reached that month. Column height is seats.</span></div>' +
+      '<p class="text-2">' + esc(summary) + "</p>" +
+      '<div class="stack-chart" role="img" aria-label="' + esc(summary) + '">' + cols + "</div>" + legend +
+      (M[M.length - 1].partial ? '<p class="small muted">* ' + esc(fmtMonth(M[M.length - 1].m)) + " is partial, through " + esc(fmtDay(END)) + ". Comparisons use " + esc(fmtMonth(M[c].m)) + ".</p>" : "") +
+      '<details><summary class="small strong" style="cursor:pointer">Show as a table</summary><div class="table-box" style="margin-top:8px"><table class="wide-600"><thead><tr><th scope="col">Month</th><th scope="col" class="num">Seats</th><th scope="col" class="num">Active</th><th scope="col" class="num">Active %</th>' +
+      [1, 2, 3, 4, 5].map(function (s) { return '<th scope="col" class="num">' + esc(C.stages[s - 1].name) + "</th>"; }).join("") + "</tr></thead><tbody>" + tableRows + "</tbody></table></div></details></section>";
+
+    // Time to first use + retention
+    var buckets = [["Same week", 0, 7], ["1 to 2 weeks", 7, 14], ["2 to 4 weeks", 14, 30], ["1 to 2 months", 30, 60], ["2+ months", 60, 99999]].map(function (bk) {
+      return { label: bk[0], n: waits.filter(function (w) { return w >= bk[1] && w < bk[2]; }).length };
+    });
+    buckets.push({ label: "Not started yet", n: notYet, warn: true });
+    var bmax = Math.max.apply(null, buckets.map(function (x) { return x.n; }).concat([1]));
+    var ttf = '<div style="display:flex;flex-direction:column;gap:10px">' + buckets.map(function (bk) {
+      return '<div style="display:grid;grid-template-columns:120px 1fr 32px;align-items:center;gap:10px"><span class="small">' + esc(bk.label) + "</span>" +
+        '<div class="bar"><span style="width:' + (bk.n / bmax * 100) + "%;" + (bk.warn ? "background:var(--warn)" : "") + '"></span></div><span class="small" style="text-align:right">' + bk.n + "</span></div>";
+    }).join("") + "</div>";
+
+    var cohorts = {};
+    people.forEach(function (p) {
+      if (!p.firstActive) return;
+      var i = HIST.indexOf(p.firstActive.slice(0, 7));
+      if (i < 0) return;
+      (cohorts[i] = cohorts[i] || []).push(p);
+    });
+    var OFFS = [0, 1, 2, 3, 4, 5];
+    var cohortRows = Object.keys(cohorts).map(Number).sort(function (a, b) { return a - b; }).map(function (i) {
+      var list = cohorts[i];
+      return '<tr><th scope="row">' + esc(fmtMonthYear(HIST[i])) + ' <span class="muted" style="font-weight:400">(' + list.length + ")</span></th>" + OFFS.map(function (k) {
+        var j = i + k;
+        if (j > R.cmp) return '<td style="background:transparent"></td>';
+        var v = pct(list.filter(function (p) { return p.monthly && p.monthly[j] && p.monthly[j][0] > 0; }).length, list.length);
+        var t = heatTone(Math.round(v / 2.2));
+        return '<td style="background:' + t[0] + ";color:" + t[1] + '">' + v + "%</td>";
+      }).join("") + "</tr>";
+    }).join("");
+    h += '<div class="row"><section class="card side" aria-labelledby="tf-h" style="flex:1 1 380px;gap:12px"><div><h2 id="tf-h">Time to first use</h2><p class="small muted" style="margin-top:4px">Days from getting a seat to the first chat.' + (medWait != null ? " Median " + Math.round(medWait) + " days." : "") + "</p></div>" + ttf +
+      (notYet ? '<a class="small" href="#/people?f=pending">See who hasn\'t started</a>' : "") + "</section>" +
+      '<section class="card grow" aria-labelledby="ret-h"><div class="section-head"><h2 id="ret-h">Do people stick with it?</h2><span class="note">People grouped by the month they started. Each cell is the share still active that many months later.</span></div>' +
+      '<div style="overflow-x:auto"><table class="heat wide-600"><thead><tr><th scope="col" style="text-align:left">Started (people)</th>' + OFFS.map(function (k) { return '<th scope="col">' + (k === 0 ? "First month" : "+" + k + " mo") + "</th>"; }).join("") + "</tr></thead><tbody>" + cohortRows + "</tbody></table></div></section></div>";
+
+    // Training impact
+    var trRows = TI.sessions.map(function (s) {
+      var res = s.note ? '<td colspan="3" class="muted small">' + esc(s.note) + "</td>"
+        : '<td class="num">' + s.rate + '%</td><td class="num">' + s.crate + '%</td><td class="num strong" style="color:' + (s.rate > s.crate ? "var(--accent-strong)" : "var(--warn)") + '">' + signed(s.rate - s.crate) + " pts</td>";
+      return '<tr><td style="white-space:nowrap">' + esc(fmtDay(s.date)) + '</td><td class="strong" style="font-weight:500">' + esc(s.session) + '</td><td class="num">' + s.attendees + "</td>" + res + "</tr>";
+    }).join("");
+    h += '<section class="card" aria-labelledby="ti-h"><div class="section-head"><h2 id="ti-h">Does training move people up?</h2><span class="note">For each session: the share of attendees who reached a higher stage within ' + plural(T.trainingWindowMonths, "month") + ', next to people at the same starting stage who didn\'t attend.</span></div>' +
+      (TI.sessions.length ? '<div class="table-box"><table class="wide-600"><thead><tr><th scope="col">Date</th><th scope="col">Session</th><th scope="col" class="num">Attended</th><th scope="col" class="num">Moved up</th><th scope="col" class="num">Didn\'t attend</th><th scope="col" class="num">Difference</th></tr></thead><tbody>' + trRows + "</tbody></table></div>" +
+        '<p class="small muted">People choose to attend, so keen people may be over-represented. Treat a gap as a signal, not proof.</p>'
+        : '<div class="empty">No attendance file yet. Add one with date, session and email to see whether training moves people up. See docs/SETUP.md.</div>') + "</section>";
+    return h;
+  }
+
+  /* ---------- use cases ---------- */
 
   function heatTone(v) {
     if (v === 0) return ["var(--heat-0)", "var(--muted)"];
@@ -526,7 +748,6 @@
     var h = '<div class="page-head"><h1>Use cases and skill opportunities</h1><p>From ' + plural(reports.length, "shared self-report") + ". What each role uses Claude for, the tasks people repeat, and where Claude falls short. Use this to pick the next skills to build.</p></div>";
     if (!reports.length) return h + '<div class="card"><div class="empty">No self-reports yet. See skills/claude-self-report in the repository to roll out the opt-in self-report.</div></div>';
 
-    // Heat map
     var cols = C.categories.slice();
     var hasOther = reports.some(function (r) { return Object.keys(r.categories || {}).some(function (c) { return c !== "Personal" && C.categories.indexOf(c) === -1; }); });
     if (hasOther) cols.push("Other");
@@ -549,7 +770,6 @@
       '<div style="overflow-x:auto"><table class="heat wide-1000"><thead><tr><th scope="col" style="text-align:left">Role</th>' + cols.map(function (c) { return '<th scope="col">' + esc(C.categoryShortNames[c] || c) + "</th>"; }).join("") + "</tr></thead><tbody>" + rowsHtml + "</tbody></table></div>" +
       (best && best.v ? '<p class="small text-2">In ' + plural(best.n, "report") + " from " + esc(best.role) + " roles, " + best.v + "% of work chats are about " + esc(best.c.toLowerCase()) + ", and there is no shared skill for it yet.</p>" : "") + "</section>";
 
-    // Repeated tasks
     var allTasks = [];
     reports.forEach(function (r) { (r.topTasks || []).forEach(function (t) { allTasks.push({ t: t, r: r }); }); });
     var matched = {};
@@ -572,7 +792,6 @@
       }).join("") + "</tbody></table></div>" +
       (unmatched.length ? "<details><summary class=\"small strong\" style=\"cursor:pointer\">" + plural(unmatched.length, "reported task") + " don't match a theme yet</summary><ul class=\"list small text-2\" style=\"margin-top:8px\">" + unmatched.map(function (t) { return "<li>" + esc(t) + "</li>"; }).join("") + "</ul></details>" : "") + "</section>";
 
-    // Shortfalls + pipeline
     var answers = reports.map(function (r) { return r.fellShort || ""; }).filter(function (a) { return a && !/nothing|n\/a|none/i.test(a); });
     var sMatched = {};
     var shorts = P.shortfallThemes.map(function (s) {
@@ -587,12 +806,14 @@
         return '<div class="item"><span class="mono strong">' + esc(x.name) + '</span><span class="small text-2">' + esc(x.note) + '</span><span class="small muted">Owner: ' + esc(x.owner || "TBD") + "</span></div>";
       }).join("") + "</div>";
     }).join("");
-    h += '<div class="row"><section class="card side" aria-labelledby="sh-h" style="flex:1 1 420px;gap:12px"><div><h2 id="sh-h">Where Claude fell short</h2><p class="small muted" style="margin-top:4px">Themes from the self-report question. Most point to setup and training, not the tool.</p></div>' +
+    h += '<div class="row"><section class="card side" aria-labelledby="sh2-h" style="flex:1 1 420px;gap:12px"><div><h2 id="sh2-h">Where Claude fell short</h2><p class="small muted" style="margin-top:4px">Themes from the self-report question. Most point to setup and training, not the tool.</p></div>' +
       (shorts.length ? shorts.map(function (s) { return '<div class="subcard" style="gap:6px;background:var(--surface)"><div style="display:flex;align-items:baseline;gap:10px"><span class="strong" style="flex:1 1 auto">' + esc(s.theme) + '</span><span class="small muted">' + plural(s.n, "person", "people") + '</span></div><div class="small text-2"><span class="strong">Fix: </span>' + esc(s.fix) + "</div></div>"; }).join("") : '<div class="small muted">No themes matched yet.</div>') +
       (sUn.length ? "<details><summary class=\"small strong\" style=\"cursor:pointer\">" + plural(sUn.length, "answer") + " don't match a theme</summary><ul class=\"list small text-2\" style=\"margin-top:8px\">" + sUn.map(function (t) { return "<li>" + esc(t) + "</li>"; }).join("") + "</ul></details>" : "") + "</section>" +
       '<section class="card grow" aria-labelledby="pp-h"><div class="section-head"><h2 id="pp-h">Skill pipeline</h2><span class="note">Ideas move right once a champion pilots them with their team. Edit in data/program.js.</span></div><div class="kanban">' + lanes + "</div></section></div>";
     return h;
   }
+
+  /* ---------- training ---------- */
 
   function viewTraining() {
     var cohorts = [
@@ -602,7 +823,7 @@
       { key: "stage-3", label: C.stages[2].name, list: active.filter(function (p) { return p.stage === 3; }), s: P.cohortSessions["3"] },
       { key: "stage-4", label: C.stages[3].name + " and " + C.stages[4].name.toLowerCase() + "s", list: active.filter(function (p) { return p.stage >= 4; }), s: P.cohortSessions["4"] }
     ];
-    var h = '<div class="page-head"><h1>Training plan</h1><p>Group people by where they are on the adoption ladder, teach the next step, and use real examples from each role.</p></div>';
+    var h = '<div class="page-head"><h1>Training plan</h1><p>Group people by where they are on the adoption ladder, teach the next step, and use real examples from each role. The Rollout tab shows whether past sessions moved people up.</p></div>';
     h += '<section class="card" aria-labelledby="co-h"><h2 id="co-h">Cohorts by stage</h2><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">' + cohorts.map(function (c) {
       return '<div class="subcard"><div style="display:flex;align-items:baseline;gap:8px"><span style="font-size:26px;font-weight:700">' + c.list.length + '</span><span class="small muted">people</span></div><div class="strong">' + esc(c.label) + "</div>" +
         '<div class="small text-2"><span class="strong">Next session: </span>' + esc(c.s ? c.s.name : "TBD") + '</div><div class="small muted">' + esc(c.s ? c.s.length : "") + "</div>" +
@@ -623,6 +844,8 @@
       "</tbody></table></div></section>";
     return h;
   }
+
+  /* ---------- self-report preview ---------- */
 
   var reportShared = {};
 
@@ -645,7 +868,7 @@
     var opts = reports.map(function (x) { return '<option value="' + esc(x.personId || "") + '"' + (x === r ? " selected" : "") + ">" + esc(x.name) + " (" + esc(x.role) + ")</option>"; }).join("");
 
     var h = '<div class="page-head"><h1>Self-report: what each person sees</h1><p>When someone runs the claude-self-report skill, Claude summarizes their own last ' + C.periodDays + " days and shows them this before anything is shared. Pick a report to preview it.</p></div>";
-    h += '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><label for="rep-pick">Report</label><select id="rep-pick" data-action="pick-report" style="min-height:40px">' + opts + "</select></div>";
+    h += '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><label for="rep-pick">Report</label><select id="rep-pick" style="min-height:40px">' + opts + "</select></div>";
     h += '<div class="row"><section class="card grow" aria-labelledby="ym-h" style="gap:16px"><div><h2 id="ym-h" style="font-size:20px">Your Claude month</h2><div class="small muted">' + esc(fmtDay(periodStart)) + " to " + esc(fmtDay(r.date)) + " · " + plural(r.chats, "chat") + (r.activeDays ? " on " + plural(r.activeDays, "day") : "") + "</div></div>" +
       '<div style="display:flex;flex-direction:column;gap:8px"><div class="small strong">What you used it for</div>' + cats.map(function (c) {
         return '<div style="display:grid;grid-template-columns:minmax(140px,220px) 1fr 36px;align-items:center;gap:10px"><span class="small">' + esc(c.c) + "</span>" + bar(Math.round(c.n / mx * 100)) + '<span class="small" style="text-align:right">' + c.n + "</span></div>";
@@ -655,13 +878,14 @@
       }).join("") + "</div></div>" +
       '<div style="display:flex;flex-direction:column;gap:6px"><div class="small strong">Tasks you repeat</div><ul class="list small text-2">' + (r.topTasks || []).map(function (t) { return "<li>" + esc(t) + "</li>"; }).join("") + "</ul></div>" +
       '<div style="display:flex;flex-direction:column;gap:6px"><div class="small strong">Where Claude fell short this month</div><div class="small text-2">' + esc(r.fellShort || "") + "</div></div>" +
+      (r.hoursSaved != null ? '<div style="display:flex;flex-direction:column;gap:6px"><div class="small strong">Time it saved you</div><div class="small text-2">About ' + esc(r.hoursSaved) + " hours</div></div>" : "") +
       '<div class="callout"><div class="small strong">One tip for next month</div><div class="small text-2">' + esc(tipFor(r)) + "</div></div>" +
       (reportShared[key]
         ? '<div class="callout callout-ok"><span class="strong" style="flex:1 1 auto">Added to the team sheet. Thanks, ' + esc(r.name.split(" ")[0]) + '.</span><button type="button" class="btn" data-action="share-report" data-key="' + esc(key) + '">Undo</button></div>'
         : '<div class="actions"><button type="button" class="btn btn-primary btn-lg" data-action="share-report" data-key="' + esc(key) + '">Share with my team</button><button type="button" class="btn btn-lg" disabled title="Preview only">Edit before sharing</button><button type="button" class="btn btn-lg" disabled title="Preview only">Keep private</button></div>') +
       "</section>";
-    var shares = [["Category counts and features used", 1], ["Top 3 tasks, worded generically", 1], ["The \"fell short\" answer", 1], ["Chat titles or content", 0], ["Names of people, clients or jobs", 0], ["Anything in personal chats", 0]];
-    var row = [["date", r.date], ["email", r.email], ["role", r.role], ["chats", r.chats], ["categories", cats.map(function (c) { return c.c + "=" + c.n; }).join("; ")], ["features", feats.join("; ")], ["top_tasks", (r.topTasks || []).join("; ")], ["fell_short", r.fellShort]];
+    var shares = [["Category counts and features used", 1], ["Top 3 tasks, worded generically", 1], ["The \"fell short\" answer and rough hours saved", 1], ["Chat titles or content", 0], ["Names of people, clients or jobs", 0], ["Anything in personal chats", 0]];
+    var row = [["date", r.date], ["email", r.email], ["role", r.role], ["chats", r.chats], ["categories", cats.map(function (c) { return c.c + "=" + c.n; }).join("; ")], ["features", feats.join("; ")], ["top_tasks", (r.topTasks || []).join("; ")], ["fell_short", r.fellShort], ["hours_saved", r.hoursSaved]];
     h += '<div class="side"><section class="card" aria-labelledby="pv-h" style="gap:10px"><h2 id="pv-h">What gets shared</h2>' + shares.map(function (s) {
       return '<div style="display:flex;gap:8px;align-items:flex-start" class="small">' + (s[1]
         ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent);flex:none" role="img" aria-label="Shared"><path d="M20 6L9 17l-5-5"/></svg>'
@@ -671,46 +895,55 @@
     return h;
   }
 
+  /* ---------- rules ---------- */
+
   function viewRules() {
     var tv = thresholdVars();
     var rules = [
-      ["pending", "Invite sent and the person has never been active.", "roster status / users.last_activity_date"],
-      ["inactive", "No activity for " + T.inactiveDays + "+ days.", "users.last_activity_date"],
       ["slowing", "Chats down " + T.slowingDropPct + "%+ from the previous period (if they had at least " + T.slowingMinPriorChats + ").", "chat_metrics.distinct_conversation_count (two periods)"],
       ["oneShot", "Under " + T.oneShotMaxMessagesPerChat + " messages per chat with " + T.oneShotMinChats + "+ chats.", "message_count ÷ distinct_conversation_count"],
-      ["noProjects", "Active, with no Projects used.", "chat_metrics.distinct_projects_used_count"],
-      ["noConnectors", "Active, with no connectors used.", "chat_metrics.distinct_connectors_used_count"],
-      ["noSkills", "Active, with no runs of a company skill.", "skills endpoint grouped by user, company skills only"],
+      ["inactive", "No activity for " + T.inactiveDays + "+ days.", "users.last_activity_date"],
+      ["pending", "Invite sent and the person has never been active.", "roster status"],
+      ["nextProjects", "Active for " + T.newSeatGraceDays + "+ days, at stage 1.", "chat_metrics.distinct_projects_used_count"],
+      ["nextConnectors", "Active for " + T.newSeatGraceDays + "+ days, at stage 2, and connectors aren't optional for their role.", "chat_metrics.distinct_connectors_used_count"],
+      ["nextSkills", "Active for " + T.newSeatGraceDays + "+ days, at stage 3.", "skills endpoint grouped by user, company skills only"],
+      ["nextBuild", "Active for " + T.newSeatGraceDays + "+ days, at stage 4.", "chat_metrics.distinct_artifacts_created_count"],
       ["champion", "Top " + T.championTopPct + "% of active people by chats, at stage " + T.championMinStage + " or above.", "users endpoint, ranked within the period"]
     ];
-    var h = '<div class="page-head"><h1>Coaching rules and data</h1><p>Every flag comes from one rule. The thresholds live in config.js and are starting points to adjust once you see real usage.</p></div>';
-    h += '<section class="card" aria-labelledby="rl-h"><h2 id="rl-h">Rules</h2><div class="table-box"><table class="wide-1000"><thead><tr><th scope="col">Flag</th><th scope="col">Triggered when</th><th scope="col">Data field</th><th scope="col">Suggested action</th></tr></thead><tbody>' +
+    var optional = Object.keys(C.roleOptionalSteps || {}).map(function (r) { return r + ": " + C.roleOptionalSteps[r].join(", "); }).join(" · ");
+    var h = '<div class="page-head"><h1>Coaching rules and data</h1><p>Every person gets one focus. Problems come first, in the order below. If there are none, the focus is the next rung on the ladder. Thresholds live in config.js.</p></div>';
+    h += '<section class="card" aria-labelledby="rl-h"><h2 id="rl-h">Rules, in priority order</h2><div class="table-box"><table class="wide-1000"><thead><tr><th scope="col">Focus</th><th scope="col">Type</th><th scope="col">Triggered when</th><th scope="col">Data field</th><th scope="col">Suggested action</th></tr></thead><tbody>' +
       rules.map(function (r) {
-        var good = r[0] === "champion";
-        return '<tr style="vertical-align:top"><td style="white-space:nowrap"><span class="pill ' + (good ? "pill-accent" : "pill-warn") + '">' + esc(P.coaching[r[0]].label) + "</span></td><td>" + esc(r[1]) + '</td><td class="mono" style="font-size:12px">' + esc(r[2]) + "</td><td>" + esc(fill(P.coaching[r[0]].queue.action, tv)) + "</td></tr>";
-      }).join("") +
-      '<tr style="vertical-align:top"><td><span class="pill pill-warn">Low-adoption skill</span></td><td>A company skill used by under ' + T.lowSkillAdoptionPct + '% of its intended audience.</td><td class="mono" style="font-size:12px">skills.distinct_user_count</td><td>Demo it, fix it, or retire it.</td></tr>' +
-      '<tr style="vertical-align:top"><td><span class="pill pill-warn">Skill opportunity</span></td><td>A category at ' + T.skillOpportunityMinSharePct + "%+ of reported chats with no skill, or a repeated task reported by " + T.taskOpportunityMinPeople + '+ people.</td><td class="mono" style="font-size:12px">Self-report sheet</td><td>Add it to the skill pipeline with a champion as owner.</td></tr>' +
+        var g = P.coaching[r[0]].group;
+        var cls = g === "attention" ? "pill-warn" : (g === "next" ? "pill-next" : "pill-accent");
+        var type = g === "attention" ? "Needs attention" : (g === "next" ? "Next step" : "Recognition");
+        return '<tr style="vertical-align:top"><td style="white-space:nowrap"><span class="pill ' + cls + '">' + esc(P.coaching[r[0]].label) + '</span></td><td class="small text-2" style="white-space:nowrap">' + type + "</td><td>" + esc(r[1]) + '</td><td class="mono" style="font-size:12px;white-space:normal">' + esc(r[2]) + "</td><td>" + esc(fill(P.coaching[r[0]].queue.action, tv)) + "</td></tr>";
+      }).join("") + "</tbody></table></div>" +
+      '<p class="small text-2">New users (active for less than ' + T.newSeatGraceDays + " days) get no next-step nudges. Steps a role doesn't need are skipped" + (optional ? ": " + esc(optional) : "") + ".</p></section>";
+    h += '<section class="card" aria-labelledby="sk2-h"><h2 id="sk2-h">Other signals</h2><div class="table-box"><table class="wide-600"><tbody>' +
+      '<tr style="vertical-align:top"><td style="white-space:nowrap"><span class="pill pill-warn">Low-adoption skill</span></td><td>A company skill used by under ' + T.lowSkillAdoptionPct + '% of its intended audience.</td><td>Demo it, fix it, or retire it.</td></tr>' +
+      '<tr style="vertical-align:top"><td style="white-space:nowrap"><span class="pill pill-warn">Skill opportunity</span></td><td>A category at ' + T.skillOpportunityMinSharePct + "%+ of reported chats with no skill, or a repeated task reported by " + T.taskOpportunityMinPeople + "+ people.</td><td>Add it to the skill pipeline with a champion as owner.</td></tr>" +
       "</tbody></table></div></section>";
-    h += '<section class="card" aria-labelledby="st-h"><h2 id="st-h">Adoption stages</h2><p class="small muted">A person\'s stage is the highest step reached in order this period. The ladder on each person\'s page also shows steps reached out of order.</p><div class="grid grid-ladder">' +
+    h += '<section class="card" aria-labelledby="st-h"><h2 id="st-h">Adoption stages</h2><p class="small muted">A person\'s stage is the highest step reached in order, skipping steps their role doesn\'t need.</p><div class="grid grid-ladder">' +
       C.stages.map(function (s, i) {
         var test = ["Had at least one chat", "Used at least one Project", "Used at least one connector", "Ran at least one company skill", "Created " + T.powerUserMinArtifacts + "+ artifacts"][i];
         return '<div class="subcard" style="background:var(--surface)"><div class="strong">' + (i + 1) + ". " + esc(s.name) + '</div><div class="small text-2">' + esc(s.desc) + '</div><div class="small muted">' + esc(test) + "</div></div>";
       }).join("") + "</div></section>";
     h += '<div class="row"><section class="card grow" aria-labelledby="src-h" style="gap:10px"><h2 id="src-h">Data sources</h2>' + [
-      ["Analytics API: users", "Per-person chats, messages, Projects, artifacts, files, skills, connectors and last active date."],
+      ["Analytics API: users", "Per-person chats, messages, Projects, artifacts, files, connectors and last active date, for this period and each month since launch."],
       ["Analytics API: skills", "Runs and distinct users for each company skill, grouped by person."],
-      ["Roster CSV", "Name, email, role and invite status for everyone with a seat."],
-      ["Self-report sheet", "One row per shared self-report. Feeds use cases, repeated tasks and \"fell short\" themes."]
+      ["Roster CSV", "Name, email, role, invite status and the date each seat was assigned."],
+      ["Training attendance CSV", "Who attended which session, for the training impact view."],
+      ["Self-report sheet", "One row per shared self-report. Feeds use cases, repeated tasks, \"fell short\" themes and hours saved."]
     ].map(function (s) { return '<div class="kv" style="flex-direction:column;gap:2px"><span class="strong mono" style="font-size:13px">' + esc(s[0]) + '</span><span class="text-2">' + esc(s[1]) + "</span></div>"; }).join("") +
-      '<p class="small muted">Run scripts/build-data.mjs nightly to refresh. Analytics data runs about a day behind. See docs/SETUP.md.</p></section>' +
-      '<section class="card side" aria-labelledby="pr-h" style="gap:10px"><h2 id="pr-h">What this does not show</h2><p class="small text-2">No chat content, titles or files. Use-case data comes only from self-reports people choose to share.</p><p class="small text-2">Tell people what is tracked before you launch. Coaching works better when nobody feels watched.</p></section></div>';
+      '<p class="small muted">Run scripts/build-data.mjs nightly to refresh. Analytics data runs about a day behind and starts on January 1, 2026. See docs/SETUP.md.</p></section>' +
+      '<section class="card side" aria-labelledby="pr-h" style="gap:10px"><h2 id="pr-h">What this does not show</h2><p class="small text-2">No chat content, titles or files. Use-case data comes only from self-reports people choose to share.</p><p class="small text-2">Show per-person detail to the AI lead and coaches, and team totals to managers. Tell people what is tracked before you launch.</p></section></div>';
     return h;
   }
 
   /* ---------- routing ---------- */
 
-  var TABS = [["overview", "Overview"], ["people", "People"], ["uses", "Use cases"], ["training", "Training"], ["report", "Self-report"], ["rules", "Rules"]];
+  var TABS = [["overview", "Overview"], ["rollout", "Rollout"], ["people", "People"], ["uses", "Use cases"], ["training", "Training"], ["report", "Self-report"], ["rules", "Rules"]];
 
   function parseRoute() {
     var hash = location.hash.replace(/^#\/?/, "");
@@ -731,6 +964,7 @@
     var html;
     if (r.name === "people") html = viewPeople(r.params);
     else if (r.name === "person") html = viewPerson(r.id);
+    else if (r.name === "rollout") html = viewRollout();
     else if (r.name === "uses") html = viewUses();
     else if (r.name === "training") html = viewTraining();
     else if (r.name === "report") html = viewReport(r.id);
@@ -753,10 +987,11 @@
 
   function csv(list) {
     var cols = ["name", "email", "role", "lastActive", "chats", "messages", "projects", "artifacts", "skills", "connectors", "stageName"];
-    var lines = [cols.concat(["flags"]).join(",")];
+    var lines = [cols.concat(["focus", "other_attention"]).join(",")];
     list.forEach(function (p) {
       var row = cols.map(function (c) { return p[c] == null ? "" : p[c]; });
-      row.push(p.warnFlags.map(function (k) { return P.coaching[k].label; }).concat(p.flags.champion ? ["Champion"] : []).join("; "));
+      row.push(p.focus ? P.coaching[p.focus].label : "");
+      row.push(p.attention.filter(function (k) { return k !== p.focus; }).map(function (k) { return P.coaching[k].label; }).join("; "));
       lines.push(row.map(function (v) { v = String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(","));
     });
     return lines.join("\n");
@@ -764,7 +999,7 @@
 
   document.addEventListener("click", function (e) {
     var el = e.target.closest("[data-action]");
-    if (!el || el.tagName === "SELECT") return;
+    if (!el) return;
     var a = el.getAttribute("data-action");
     if (a === "filter") {
       location.hash = "#/people" + (el.dataset.filter === "all" ? "" : "?f=" + encodeURIComponent(el.dataset.filter));
@@ -773,8 +1008,7 @@
       if (peopleState.sort === k) peopleState.dir = -peopleState.dir; else { peopleState.sort = k; peopleState.dir = (k === "name" || k === "days") ? 1 : -1; }
       render();
     } else if (a === "copy-emails") {
-      var list = people.filter(flagFilter(el.dataset.filter));
-      if (parseRoute().name === "people") list = peopleRows(el.dataset.filter);
+      var list = parseRoute().name === "people" ? peopleRows(el.dataset.filter) : people.filter(el.dataset.filter === "champion" ? function (p) { return p.champion; } : flagFilter(el.dataset.filter));
       copyText(emailsFor(list), "Copied " + plural(list.length, "email address", "email addresses") + ".");
     } else if (a === "export-csv") {
       var rows = peopleRows(el.dataset.filter);
@@ -814,7 +1048,6 @@
     if (e.target.id === "search") { peopleState.q = e.target.value; rerenderPeopleBody(); }
   });
 
-  // Header status
   var live = D.source === "live";
   document.getElementById("brand-title").textContent = C.labels.title;
   document.getElementById("data-status").innerHTML =

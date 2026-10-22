@@ -1,5 +1,5 @@
-email,name,role,status
-dana.whitfield@example.com,Dana Whitfield,Project Manager,active
-tom.becker@example.com,Tom Becker,Project Engineer,active
-mark.delaney@example.com,Mark Delaney,Superintendent,active
-jordan.ellis@example.com,Jordan Ellis,Superintendent,pending
+email,name,role,status,seat_date
+dana.whitfield@example.com,Dana Whitfield,Project Manager,active,2026-01-12
+tom.becker@example.com,Tom Becker,Project Engineer,active,2026-03-02
+mark.delaney@example.com,Mark Delaney,Superintendent,active,2026-03-02
+jordan.ellis@example.com,Jordan Ellis,Superintendent,pending,2026-09-28

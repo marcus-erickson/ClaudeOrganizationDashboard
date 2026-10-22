@@ -152,4 +152,5 @@ vite.config.ts.timestamp-*
 data/live-data.js
 data/roster.csv
 data/self-reports.csv
+data/attendance.csv
 *.local.csv

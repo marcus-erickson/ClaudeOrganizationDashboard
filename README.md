@@ -6,13 +6,16 @@ It is a single static page (HTML, CSS and plain JavaScript with no build step an
 
 ![Company overview](docs/images/overview.png)
 
+![Rollout](docs/images/rollout.png)
+
 ## What it shows
 
 | Tab | What you get |
 |---|---|
-| **Overview** | Seats, weekly active people, messages per chat, and adoption of Projects, company skills and connectors. A coaching queue groups people by rule (inactive, one-shot questions, no Projects, no connectors, no company skills, champions), and each card copies the right email list in one click. Also shows what people use Claude for, adoption of each company skill, and weekly activity by role. |
-| **People** | Everyone with a seat, with sortable columns, filters, search, adoption stage and coaching flags. Export to CSV or copy emails for any filter. |
-| **Person drill-down** | A five-step adoption ladder, the person's numbers next to company and role medians, a coaching plan built from their flags (mark steps done, email the plan to them), weekly trend, what others in the role use, their self-report, and private coaching notes. |
+| **Overview** | Seats, weekly active people, messages per chat, and adoption of Projects, company skills and connectors. "Start here this week" names the few people most worth a conversation. The coaching queue gives everyone one focus: a problem to fix first (slowing down, one-shot questions, inactive, never signed in), or else the next rung on the adoption ladder. Each card copies the right email list in one click. Also shows what people use Claude for, adoption of each company skill, and weekly activity by role. |
+| **Rollout** | Whether the rollout is working: adoption by month against seats, stage by stage since launch, days from seat to first use, whether people stick with it (by the month they started), whether training sessions move people up a stage compared with people who didn't attend, and self-reported hours saved. |
+| **People** | Everyone with a seat, with sortable columns, filters, search, adoption stage and their current focus. Export to CSV or copy emails for any filter. |
+| **Person drill-down** | A five-step adoption ladder with the next step highlighted, the person's numbers next to company and role medians, a coaching plan with one focus now and the rest later (mark steps done, email the plan to them), weekly trend, what others in the role use, their self-report, and private coaching notes. |
 | **Use cases** | A role-by-category heat map, repeated tasks matched to skill opportunities, themes from "where did Claude fall short", and a skill pipeline from idea to shared. |
 | **Training** | Cohorts by adoption stage with the next session for each, role tracks with champions, and upcoming sessions. |
 | **Self-report** | A preview of what each person sees when they run the opt-in self-report skill, and the exact row it shares. |
@@ -40,9 +43,9 @@ To host it, turn on GitHub Pages for your copy (Settings > Pages > Deploy from b
 2. **Make a private copy.** Clone this repository into a private repo or an internal folder. Your live data will contain names, so don't build it inside a public fork. *(AI lead)*
 3. **Adapt it to your organization.** In `config.js`, set your organization name, the 8 to 10 work categories people will report against, your company skills and who each one is for, and the coaching thresholds. In `data/program.js`, rewrite the coaching wording, repeated-task themes, role tracks and champions. See [docs/CUSTOMIZE.md](docs/CUSTOMIZE.md), which includes starter category lists for law, healthcare, agencies and general offices. *(AI lead)*
 4. **Create an Analytics API key** with the `read:analytics` scope at claude.ai > Organization settings > API. Requires Claude Enterprise. See [SETUP step 1](docs/SETUP.md#1-create-an-analytics-api-key). *(Primary Owner)*
-5. **Build the roster.** Copy `data/roster.example.csv` to `data/roster.csv` and list everyone with a seat: email, name, role, and `pending` for unaccepted invites. Use the same role names as in step 3. See [SETUP step 2](docs/SETUP.md#2-make-the-roster). *(AI lead or IT)*
+5. **Build the roster.** Copy `data/roster.example.csv` to `data/roster.csv` and list everyone with a seat: email, name, role, the date they got the seat, and `pending` for unaccepted invites. If you run training sessions, start an attendance list too (`data/attendance.example.csv`). Use the same role names as in step 3. See [SETUP step 2](docs/SETUP.md#2-make-the-roster). *(AI lead or IT)*
 6. **Roll out the self-report** (optional, recommended). Create the shared Google Sheet and paste its URL and your category list into [`skills/claude-self-report/SKILL.md`](skills/claude-self-report/SKILL.md). Zip the `claude-self-report` folder, test it under **Customize > Skills > + > Create skill > Upload a skill**, then have an Owner add it for everyone under **Organization settings > Plugins & skills > Add > Upload a skill**. See [Installing the self-report skill](docs/SETUP.md#installing-the-self-report-skill). *(AI lead and an Owner)*
-7. **Build the live data and host it internally.** Run `node scripts/build-data.mjs --roster data/roster.csv --reports data/self-reports.csv`, check that the header says **Live data**, and put the folder somewhere only coaches and managers can open. Schedule the script to run nightly. See [SETUP steps 5 and 6](docs/SETUP.md#5-build-the-data). *(Whoever runs scripts)*
+7. **Build the live data and host it internally.** Set `launchDate` in `config.js`, then run `node scripts/build-data.mjs --roster data/roster.csv --reports data/self-reports.csv --attendance data/attendance.csv` (the last two are optional). Check that the header says **Live data**, and put the folder somewhere only coaches and managers can open. Schedule the script to run nightly. See [SETUP steps 5 and 6](docs/SETUP.md#5-build-the-data). *(Whoever runs scripts)*
 8. **Launch.** Tell everyone what is tracked and why, ask managers to have people run the self-report at their first one-on-one of the month, and hold a monthly review of the coaching queue and skill opportunities. *(AI lead and managers)*
 
 ## Where the data comes from
@@ -77,7 +80,7 @@ config.js                   Your categories, skills and thresholds
 data/program.js             Your coaching wording, themes, training and pipeline
 data/sample-data.js         Fictional sample organization
 data/live-data.js           Your real data (generated, git-ignored)
-data/*.example.csv          Example roster and self-report sheet
+data/*.example.csv          Example roster, self-report sheet and training attendance
 scripts/build-data.mjs      Builds live-data.js from the Analytics API
 skills/claude-self-report/  The opt-in self-report skill
 docs/                       Setup and customization guides

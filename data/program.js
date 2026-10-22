@@ -6,49 +6,65 @@
  * Edit freely. Wording in {curly braces} is filled in by the dashboard.
  *
  * Placeholders available in coaching text:
- *   {name} {firstName} {role} {chats} {mpc} {days} {roleSkill} {roleSkillUsers}
+ *   {name} {firstName} {role} {chats} {prevChats} {mpc} {days} {roleSkill} {roleSkillUsers}
  */
 window.COACHING_PROGRAM = {
 
-  // One entry per coaching flag. "queue" text appears on the overview cards,
-  // "plan" text appears in a person's coaching plan.
+  // Coaching wording. Every person gets one focus at a time:
+  //   "attention" flags are problems to address first, in this order;
+  //   "next step" flags are the next rung on the adoption ladder.
+  // "queue" text appears on the overview cards, "plan" text in a person's plan.
   coaching: {
+    slowing: {
+      group: "attention",
+      label: "Slowing down",
+      queue: { signal: "Chats down {slowingDropPct}% or more from last period.", action: "Ask what changed. Often a bad answer or a blocker nobody mentioned.", cta: "Draft check-ins" },
+      plan: { title: "Usage is dropping", why: "{chats} chats this period, down by half or more from {prevChats} last period.", action: "Ask what changed. Often a bad answer or a blocker they haven't mentioned.", cta: "Draft check-in" }
+    },
+    oneShot: {
+      group: "attention",
+      label: "One-shot questions",
+      queue: { signal: "Under {oneShotMaxMessagesPerChat} messages per chat with {oneShotMinChats}+ chats this period.", action: "Invite to the 30-minute \"Getting better answers\" session.", cta: "Send invites" },
+      plan: { title: "Mostly one-shot questions", why: "{mpc} messages per chat across {chats} chats. First answers are rarely the best ones.", action: "Invite to \"Getting better answers\" and pair for 30 minutes with a champion in a similar role.", cta: "Send invite" }
+    },
     inactive: {
+      group: "attention",
       label: "Inactive seat",
       queue: { signal: "No activity in {inactiveDays}+ days. Mostly field roles.", action: "Check in personally, and show voice mode on their phone before giving up on the seat.", cta: "Draft check-ins" },
       plan: { title: "Inactive seat", why: "No activity for {days} days.", action: "Check in personally. Reassign the seat after 30 days if they don't need it.", cta: "Draft check-in" }
     },
     pending: {
+      group: "attention",
       label: "Hasn't signed in",
       queue: { signal: "Invite sent but never accepted.", action: "Walk them through sign-in on their phone and show one quick win.", cta: "Resend invites" },
       plan: { title: "Hasn't signed in", why: "Invite sent but never accepted.", action: "Walk {firstName} through sign-in on their phone at the jobsite and show voice mode.", cta: "Resend invite" }
     },
-    slowing: {
-      label: "Slowing down",
-      queue: { signal: "Chats down {slowingDropPct}% or more from last period.", action: "Ask what changed. Often a bad answer or a blocker nobody mentioned.", cta: "Draft check-ins" },
-      plan: { title: "Usage is dropping", why: "{chats} chats this period, down by half or more from last period.", action: "Ask what changed. Often a bad answer or a blocker they haven't mentioned.", cta: "Draft check-in" }
+    nextProjects: {
+      group: "next",
+      label: "Next: Projects",
+      queue: { signal: "Asking questions regularly, ready to keep their work in a Project.", action: "Set up a Project per active job with the contract, specs and schedule loaded.", cta: "Share job Project template" },
+      plan: { title: "Next step: a Project for their job", why: "Re-explains the job and re-uploads documents chat by chat.", action: "Set up a Project for {firstName}'s current job with the contract, spec book and schedule loaded.", cta: "Share job Project template" }
     },
-    oneShot: {
-      label: "One-shot questions",
-      queue: { signal: "Under {oneShotMaxMessagesPerChat} messages per chat with {oneShotMinChats}+ chats this period.", action: "Invite to the 30-minute \"Getting better answers\" session.", cta: "Send invites" },
-      plan: { title: "Mostly one-shot questions", why: "{mpc} messages per chat across {chats} chats. First answers are rarely the best ones.", action: "Invite to \"Getting better answers\" and pair for 30 minutes with a champion in a similar role.", cta: "Send invite" }
+    nextConnectors: {
+      group: "next",
+      label: "Next: connectors",
+      queue: { signal: "Using Projects, ready to connect the tools their documents live in.", action: "Help connect the job folder so Claude can read specs and logs directly.", cta: "Send setup guide" },
+      plan: { title: "Next step: connect their work tools", why: "Nothing connected, so Claude only sees what {firstName} pastes in.", action: "Connect the job folder so Claude can read logs, specs and correspondence directly.", cta: "Send setup guide" }
     },
-    noProjects: {
-      label: "No Projects",
-      queue: { signal: "Active, but no Project used this period.", action: "Set up a Project per active job with the contract, specs and schedule loaded.", cta: "Share job Project template" },
-      plan: { title: "No Projects yet", why: "Re-explains the job and re-uploads documents chat by chat.", action: "Set up a Project for {firstName}'s current job with the contract, spec book and schedule loaded.", cta: "Share job Project template" }
+    nextSkills: {
+      group: "next",
+      label: "Next: company skills",
+      queue: { signal: "Set up well, ready to reuse the skills we built for their role.", action: "Send the 2 skills most used by others in the same role.", cta: "Send skill picks" },
+      plan: { title: "Next step: a company skill", why: "{roleSkill} is used by {roleSkillUsers} in this role.", action: "Send {roleSkill} with a one-line example of what to type.", cta: "Send skill" }
     },
-    noConnectors: {
-      label: "No connectors",
-      queue: { signal: "Hasn't connected the job folder, email or other work tools.", action: "Help connect the job folder so Claude can read specs and logs directly.", cta: "Send setup guide" },
-      plan: { title: "No connectors", why: "Nothing connected, so Claude only sees what {firstName} pastes in.", action: "Connect the job folder so Claude can read logs, specs and correspondence directly.", cta: "Send setup guide" }
-    },
-    noSkills: {
-      label: "No company skills",
-      queue: { signal: "Active, but hasn't run any skill we published.", action: "Send the 2 skills most used by others in the same role.", cta: "Send skill picks" },
-      plan: { title: "Hasn't used a company skill", why: "{roleSkill} is used by {roleSkillUsers} in this role.", action: "Send {roleSkill} with a one-line example of what to type.", cta: "Send skill" }
+    nextBuild: {
+      group: "next",
+      label: "Next: build and share",
+      queue: { signal: "Reusing company skills, ready to build something for their team.", action: "Invite to the \"Build a skill for your team\" workshop.", cta: "Send invites" },
+      plan: { title: "Next step: build something for the team", why: "Uses company skills regularly and knows the work well.", action: "Invite {firstName} to the skill-building workshop and ask which repeated task they'd automate first.", cta: "Send invite" }
     },
     champion: {
+      group: "recognition",
       label: "Champion",
       queue: { signal: "Top {championTopPct}% by use and at stage {championMinStage} or above.", action: "Ask them to demo a workflow at the next PM or superintendent meeting.", cta: "Ask to demo" },
       plan: { title: "Champion", why: "Among the top users and well up the adoption ladder.", action: "Ask {firstName} to demo one workflow at the next role meeting and own a skill in the pipeline.", cta: "Ask to demo" }

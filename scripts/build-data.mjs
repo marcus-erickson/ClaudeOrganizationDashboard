@@ -16,6 +16,8 @@
  * Options:
  *   --roster <path>     CSV with email,name,role[,status]. Required.
  *   --reports <path|url> CSV of shared self-reports (see docs/SETUP.md). Optional.
+ *   --attendance <path> CSV of training attendance: date,session,email. Optional.
+ *   --since YYYY-MM-DD  Start of the history. Default: launchDate in config.js.
  *   --end YYYY-MM-DD    Last day of the period. Default: two days ago (UTC),
  *                       the latest day the Analytics API usually has.
  *   --days <n>          Period length. Default: periodDays from config.js.
@@ -70,6 +72,17 @@ const END = opts.end || addDays(day(new Date()), -2);
 const START = addDays(END, -(days - 1));
 const PREV_END = addDays(START, -1);
 const PREV_START = addDays(PREV_END, -(days - 1));
+const API_FLOOR = "2026-01-01"; // the Analytics API has no engagement data before this day
+const LAUNCH = [opts.since || CONFIG.launchDate || API_FLOOR, API_FLOOR].sort().pop();
+const monthKey = (d) => d.slice(0, 7);
+const monthStart = (m) => m + "-01";
+const monthLast = (m) => { const d = new Date(m + "-01T00:00:00Z"); d.setUTCMonth(d.getUTCMonth() + 1); d.setUTCDate(0); return day(d); };
+function monthsBetween(a, b) {
+  const out = [];
+  let m = monthKey(a);
+  while (m <= monthKey(b)) { out.push(m); m = monthKey(addDays(monthLast(m), 1)); }
+  return out;
+}
 
 /* ---------- CSV ---------- */
 
@@ -113,7 +126,12 @@ const splitList = (s) => String(s || "").split(/;|\|/).map((x) => x.trim()).filt
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+let lastCall = 0;
 async function api(pathname, params) {
+  // Stay under the 60 requests per minute limit.
+  const wait = lastCall + 1050 - Date.now();
+  if (wait > 0) await sleep(wait);
+  lastCall = Date.now();
   const qs = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {
     if (Array.isArray(v)) v.forEach((x) => qs.append(k, x));
@@ -170,7 +188,7 @@ const userIdOf = (row) => (row.user && row.user.id) || row.user_id || (row.group
 /* ---------- main ---------- */
 
 async function main() {
-  log(`Period ${START} to ${END} (previous ${PREV_START} to ${PREV_END})`);
+  log(`Period ${START} to ${END} (previous ${PREV_START} to ${PREV_END}). History from ${LAUNCH}.`);
 
   const roster = parseCsv(await readSource(opts.roster));
   if (!roster.length || !("email" in roster[0])) fail("The roster needs at least an email column, plus name and role.");
@@ -179,17 +197,33 @@ async function main() {
   log("Fetching user activity...");
   const cur = await getAll("/users", range(START, END));
   const prev = await getAll("/users", range(PREV_START, PREV_END));
+  // Weekly history back to launch: gives the 8-week trend and each person's first active week.
+  log("Fetching weekly history (about one request per second)...");
+  const weekEnds = [];
+  for (let wEnd = END; addDays(wEnd, -6) >= LAUNCH || weekEnds.length < 8; wEnd = addDays(wEnd, -7)) {
+    if (addDays(wEnd, -6) < API_FLOOR) break;
+    weekEnds.unshift(wEnd);
+  }
   const weeks = [];
-  for (let w = 7; w >= 0; w--) {
-    const wEnd = addDays(END, -7 * w);
-    weeks.push(await getAll("/users", range(addDays(wEnd, -6), wEnd)));
+  for (const wEnd of weekEnds) weeks.push(await getAll("/users", range(addDays(wEnd, -6), wEnd)));
+
+  // Monthly history since launch, for the Rollout tab.
+  log("Fetching monthly history...");
+  const MONTHS = monthsBetween(LAUNCH, END);
+  const monthRows = [];
+  const monthSkills = [];
+  const companyNames = new Set((CONFIG.companySkills || []).map((s) => s.name));
+  for (const m of MONTHS) {
+    const a = [monthStart(m), LAUNCH].sort().pop();
+    const b = [monthLast(m), END].sort()[0];
+    monthRows.push(await getAll("/users", range(a, b)));
+    monthSkills.push(await getAll("/skills", { ...range(a, b), "group_by[]": ["user_id"] }));
   }
 
   const idToEmail = {};
-  for (const r of cur.concat(prev, ...weeks)) { const id = userIdOf(r); const e = emailOf(r); if (id && e) idToEmail[id] = e; }
+  for (const r of cur.concat(prev, ...weeks, ...monthRows)) { const id = userIdOf(r); const e = emailOf(r); if (id && e) idToEmail[id] = e; }
 
   log("Fetching skill usage...");
-  const companyNames = new Set((CONFIG.companySkills || []).map((s) => s.name));
   const skillRows = await getAll("/skills", { ...range(START, END), "group_by[]": ["user_id"] });
   const skillsByEmail = {};
   const runs = {};
@@ -219,7 +253,17 @@ async function main() {
   }
 
   const index = (rows) => Object.fromEntries(rows.map((r) => [emailOf(r), r]));
-  const curBy = index(cur), prevBy = index(prev), weekBy = weeks.map(index);
+  const curBy = index(cur), prevBy = index(prev), weekBy = weeks.map(index), monthBy = monthRows.map(index);
+  const monthSkillCount = monthSkills.map((rows) => {
+    const by = {};
+    for (const r of rows) {
+      const name = r.skill_display_name || r.skill_name;
+      if (!companyNames.has(name) && !companyNames.has(r.skill_name)) continue;
+      const email = idToEmail[userIdOf(r)] || emailOf(r);
+      if (email) (by[email] = by[email] || new Set()).add(name);
+    }
+    return by;
+  });
 
   const known = new Set(roster.map((r) => r.email.toLowerCase()));
   const extra = cur.filter((r) => emailOf(r) && !known.has(emailOf(r))).map((r) => ({ email: emailOf(r), name: "", role: "Unassigned" }));
@@ -247,7 +291,14 @@ async function main() {
       connectorCount: c.connectors,
       connectorNames: [...(connectorsByEmail[email] || [])],
       skillNames: [...(skillsByEmail[email] || [])],
-      weeklyChats: weekBy.map((w) => (w[email] ? chatBlock(w[email]).chats : 0))
+      weeklyChats: weekBy.slice(-8).map((w) => (w[email] ? chatBlock(w[email]).chats : 0)),
+      seatDate: r.seat_date ? r.seat_date.slice(0, 10) : null,
+      firstActive: (() => { const i = weekBy.findIndex((w) => w[email] && chatBlock(w[email]).chats > 0); return i < 0 ? null : addDays(weekEnds[i], -6); })(),
+      monthly: MONTHS.map((m, i) => {
+        if (r.seat_date && r.seat_date.slice(0, 10) > monthLast(m)) return null;
+        const b = monthBy[i][email] ? chatBlock(monthBy[i][email]) : chatBlock({});
+        return [b.chats, b.messages, b.projects, b.connectors, monthSkillCount[i][email] ? monthSkillCount[i][email].size : 0, b.artifacts];
+      })
     };
   });
 
@@ -274,10 +325,19 @@ async function main() {
           categories,
           features: splitList(r.features),
           topTasks: splitList(r.top_tasks),
-          fellShort: r.fell_short || ""
+          fellShort: r.fell_short || "",
+          hoursSaved: r.hours_saved === undefined || r.hours_saved === "" ? null : Number(r.hours_saved)
         };
       });
     log(`Self-reports: ${selfReports.length} in this period`);
+  }
+
+  let training = [];
+  if (opts.attendance) {
+    training = parseCsv(await readSource(opts.attendance))
+      .filter((r) => r.date && r.email)
+      .map((r) => ({ date: r.date.slice(0, 10), session: r.session || "Training session", email: r.email.toLowerCase() }));
+    log(`Training attendance: ${training.length} rows`);
   }
 
   const skills = (CONFIG.companySkills || []).map((s) => ({ name: s.name, audienceRoles: s.audienceRoles || [], runs: runs[s.name] || 0 }));
@@ -287,6 +347,8 @@ async function main() {
     orgName: CONFIG.orgName,
     periodStart: START,
     periodEnd: END,
+    months: MONTHS,
+    training,
     generatedAt: new Date().toISOString(),
     skills,
     people,

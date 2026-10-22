@@ -57,9 +57,11 @@ Tell the person in one line what you could see, for example "I found 63 chats fr
 - Note which features showed up at least once: web search, file uploads, artifacts, Projects, a company skill, a connector.
 - Pick the person's top 3 repeated tasks: kinds of work that came up in several chats. Word each one generically, in under 10 words, starting with a verb ending in -ing.
 
-### 3. Ask one question
+### 3. Ask two questions, one at a time
 
-Ask: "Where did Claude fall short for you this month? One sentence is plenty, or say skip." Wait for the answer. Strip any names or identifying details from it before it goes in the summary, and tell the person if you changed it.
+First ask: "Where did Claude fall short for you this month? One sentence is plenty, or say skip." Wait for the answer. Strip any names or identifying details from it before it goes in the summary, and tell the person if you changed it.
+
+Then ask: "Roughly how many hours did Claude save you this month? A gut feel is fine, or say skip." Record a whole number, or leave it empty if they skip. Don't push for precision.
 
 ### 4. Show the summary
 
@@ -71,18 +73,20 @@ Show the person their month in this shape:
 - Features you used, and features you didn't use
 - Tasks you repeat: the three tasks
 - Where Claude fell short: their answer
+- Time it saved you: their estimate, if they gave one
 - One tip for next month: one specific, practical suggestion based on what you saw. For example, if they uploaded the same kind of document many times and never used Projects, suggest a Project. If they never used a connector, suggest connecting the tool their documents live in. Keep it to two sentences.
 
 Then show exactly what would be shared, as the row below, and ask: "Share this with your team? (share / edit / keep private)"
 
-| date | email | name | role | chats | active_days | categories | features | top_tasks | fell_short |
-|---|---|---|---|---|---|---|---|---|---|
+| date | email | name | role | chats | active_days | categories | features | top_tasks | fell_short | hours_saved |
+|---|---|---|---|---|---|---|---|---|---|---|
 
 - `date`: today, YYYY-MM-DD
 - `email`, `name`: the person's own. Ask for their role if you don't know it.
 - `categories`: `Category=count` pairs separated by `; `, Personal included as a count only
 - `features`, `top_tasks`: values separated by `; `
 - `fell_short`: their cleaned-up answer, or empty
+- `hours_saved`: a whole number, or empty
 
 ### 5. Share only with permission
 
