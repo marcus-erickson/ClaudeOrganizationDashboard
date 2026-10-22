@@ -54,7 +54,7 @@ Use the skill name as it appears in the Analytics API (`skill_name`, or `skill_d
 
    `data/self-reports.example.csv` has a sample row. `categories` holds `Category=count` pairs separated by `; `, and `features` and `top_tasks` are lists separated by `; `.
 
-   People who work in Projects run the skill once outside any Project (`scope` = `main`) and once inside each Project they use for work (`scope` = `project`). Chat search can't see inside Projects from outside, so this is the only way to count that work. The build script adds each person's Project rows to their main row for the same month.
+   **Projects.** Chat search can't see inside Projects from outside them. If people have Claude in Chrome or the built-in browser, the skill reads their full chat list at claude.ai/chats instead, which includes every Project, in one run. Without a browser, people who work in Projects run the skill once outside any Project (`scope` = `main`) and once inside each Project they use for work (`scope` = `project`), and the build script adds each person's Project rows to their main row for the month. Some organizations restrict browser extensions, so check before you count on the browser method.
 
 2. Select column A (date) and choose **Format > Number > Plain text**, so dates stay as `2026-10-22` instead of turning into serial numbers. The skill also writes the date as text, and the build script can read either.
 3. Share the sheet so everyone who will run the skill can edit it.

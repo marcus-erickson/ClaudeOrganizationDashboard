@@ -43,14 +43,23 @@ These rules are not optional, and they apply to everything that would be shared:
 
 ### 1. Gather the last 30 days
 
-Use your chat history tools (for example recent chats and conversation search) to list the person's chats from the last 30 days. Page back until you reach chats older than 30 days or run out. Work from chat titles and summaries; you do not need to open full transcripts.
+There are two ways to gather chats. Use the browser method when you can, because it is the only one that sees every chat, including chats inside Projects, in a single run.
 
-Tell the person in one line what you could see, for example "I found 63 chats from Sep 20 to Oct 19." Mention these limits when they apply:
+**Browser method (preferred).** If Claude in Chrome or the built-in browser is available and signed in to Claude:
 
-- If chat history search is turned off, say that the report needs it on (Settings) and stop.
-- Chat search only sees one area at a time: outside a Project it sees chats outside Projects, and inside a Project it sees only that Project's chats. Nothing can read every Project from one place.
+1. Open a new tab at `https://claude.ai/chats` (the full list behind "View all" under Recents). It lists every chat on the account, in and out of Projects, newest first, with a title and a relative date ("3 days ago", "Oct 14").
+2. Scroll down a screen at a time, waiting a second or two after each scroll for more rows to load, until you see dates older than 30 days or reach the end.
+3. Read the titles and dates with the page text tool. If the list is long, a short script in the page that collects each row's title and date is quicker and less error-prone than reading screenshots. Only read the list itself; do not open any chat.
+4. Optionally open `https://claude.ai/projects` to count the Projects used in the last 30 days for `projects_active`. Never record Project names.
+5. Close the tab when done.
 
-**Decide which kind of run this is:**
+Work from titles only. They are short, so sort them by their main purpose and accept that a few will be ambiguous. When the person can see the list, mention that the browser method read their chat list in their own browser and nothing was opened. If the browser asks for permission to use claude.ai, tell the person and wait.
+
+**Chat search method (fallback).** Without a browser, use your chat history tools (for example recent chats and conversation search) and page back until you reach chats older than 30 days. Work from titles and summaries. Chat search only sees one area at a time: outside a Project it sees chats outside Projects, and inside a Project it sees only that Project's chats. So this method needs the Project runs described below.
+
+Tell the person in one line what you could see, for example "I found 168 chats from Sep 23 to Oct 22, including chats in Projects." If chat history search is turned off and no browser is available, say that the report needs one of them and stop.
+
+**Decide which kind of run this is** (only needed for the chat search method; a browser run is always a main run that already includes Projects):
 
 - **Main run** (outside any Project): the full report, both questions, and the `scope` column set to `main`.
 - **Project run** (inside a Project): count this Project's chats only, skip both questions, and set `scope` to `project`. The dashboard adds Project runs to the person's main run for the same month, so they never need to combine anything by hand.
